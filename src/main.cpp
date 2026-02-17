@@ -49,17 +49,45 @@ float L1 = 0.3;
 float L2 = r4 * 2;
 float theta2_max = 160 * deg2rad;
 
+/*
+Homing switches (normally LOW): GPIO01, GPIO2
+ 
+High current switch (vacuum motor on/off): GPIO38
+ 
+Motor Driver A:
+INA - GPIO4 X
+ENA - GPIO5 X
+PWM - GPIO6 X
+CS - GPIO7
+ENB - GPIO15 X
+INB - GPIO16 X
+ 
+Motor Driver B:
+INA - GPIO17 X
+ENA - GPIO8 X
+PWM - GPIO3 X
+CS - GPIO9
+ENB - GPIO10 X
+INB - GPIO11 X
+*/
+
 // motor1 - the motor that controls theta1
-int motor1PWM = 9;
-int motor1dir = 10;  // HIGH is Clockwise
-int motor1encA = 5;
-int motor1encB = 6;
+int motor1PWM = 6;
+int motor1dirA = 4;  // HIGH is Clockwise
+int motor1dirB = 16;  
+int motor1encA = 13;
+int motor1encB = 14;
+int motor1enableA = 5;
+int motor1enableB = 15;
 
 // motor2 - the motor that controls theta2
-int motor2PWM = 1;
-int motor2dir = 2;  // HIGH is Clockwise
-int motor2encA = 3;
-int motor2encB = 4;
+int motor2PWM = 3;
+int motor2dirA = 17;  // HIGH is Clockwise
+int motor2dirB = 11;
+int motor2encA = 47; 
+int motor2encB = 48;
+int motor2enableA = 8;
+int motor2enableB = 10;
 
 // Limit switches
 int limit1 = 13;  // this limit is for theta1
@@ -116,6 +144,17 @@ enum MachineStates {
 
 MachineStates currentState = Waiting;
 
+// Function prototypes
+void MotorDirection(int motor, int direction);
+void HomeMotors();
+void zAxis(int toggleA);
+void suction(int toggleS);
+void updatePosition(int x, int y);
+void inverseCalc(float x, float y, int pointNum);
+bool PositionChange1(int target);
+bool PositionChange2(int target);
+int radToPos(float radians);
+
 void setup() {
 
   // SERIAL INITIALIZATION //
@@ -123,7 +162,7 @@ void setup() {
   while (!Serial)
     ;
   delay(500);
-  Serial2.begin(115200, SERIAL_8N1, 38, 39);
+  Serial2.begin(115200, SERIAL_8N1, 36, 37); // rx, tx
   Serial.println("System Online. Listening for other ESP32 on Pins 38/39...");
 
   // I2C initialization
@@ -133,16 +172,30 @@ void setup() {
   // PIN INITIALIZATION //
   // motor 1
   pinMode(motor1PWM, OUTPUT);
-  pinMode(motor1dir, OUTPUT);
+  pinMode(motor1dirA, OUTPUT);
+  pinMode(motor1dirB, OUTPUT);
   pinMode(motor1encA, INPUT_PULLDOWN);
   pinMode(motor1encB, INPUT_PULLDOWN);
-  digitalWrite(motor1dir, HIGH);
+
+  pinMode(motor1enableA, OUTPUT);
+  pinMode(motor1enableB, OUTPUT);
+  digitalWrite(motor1enableA, HIGH);
+  digitalWrite(motor1enableB, HIGH);
+  digitalWrite(motor1dirA, HIGH);
+  digitalWrite(motor1dirB, LOW);
   // motor 2
   pinMode(motor2PWM, OUTPUT);
-  pinMode(motor2dir, OUTPUT);
+  pinMode(motor2dirA, OUTPUT);
+  pinMode(motor2dirB, OUTPUT);
   pinMode(motor2encA, INPUT_PULLDOWN);
   pinMode(motor2encB, INPUT_PULLDOWN);
-  digitalWrite(motor2dir, HIGH);
+
+  pinMode(motor2enableA, OUTPUT);
+  pinMode(motor2enableB, OUTPUT);
+  digitalWrite(motor2enableA, HIGH);
+  digitalWrite(motor2enableB, HIGH);
+  digitalWrite(motor2dirA, HIGH);
+  digitalWrite(motor2dirB, LOW);
   // limit switches
   pinMode(limit1, INPUT_PULLDOWN);
   pinMode(limit2, INPUT_PULLDOWN);
@@ -310,6 +363,26 @@ void loop() {
 
 // FUNCTION DEFINITIONS //
 
+void MotorDirection(int motor, int direction) {
+  if (motor == 1) {
+    if (direction == HIGH) {
+      digitalWrite(motor1dirA, HIGH);
+      digitalWrite(motor1dirB, LOW);
+    } else {
+      digitalWrite(motor1dirA, LOW);
+      digitalWrite(motor1dirB, HIGH);
+    }
+  } else if (motor == 2) {
+    if (direction == HIGH) {
+      digitalWrite(motor2dirA, HIGH);
+      digitalWrite(motor2dirB, LOW);
+    } else {
+      digitalWrite(motor2dirA, LOW);
+      digitalWrite(motor2dirB, HIGH);
+    }
+  }
+}
+
 void HomeMotors() {
 
   /*Serial.println("Homing... ");
@@ -371,7 +444,7 @@ bool PositionChange1(int target) {
   Setpoint1 = target;
   Input1 = position1;
   PID1.Compute();
-  digitalWrite(motor1dir, Output1 >= 0 ? LOW : HIGH);
+  MotorDirection(1, Output1 >= 0 ? HIGH : LOW);
   analogWrite(motor1PWM, abs(Output1));
 
   if (abs(position1 - target) <= 5) {
@@ -392,7 +465,7 @@ bool PositionChange2(int target) {
   Setpoint2 = target;
   Input2 = position2;
   PID2.Compute();
-  digitalWrite(motor2dir, Output2 >= 0 ? LOW : HIGH);
+  MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
   analogWrite(motor2PWM, abs(Output2));
 
   if (abs(position2 - target) <= 0) {
