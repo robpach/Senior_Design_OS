@@ -1,0 +1,27 @@
+{
+  "name": "ESP32-S3-WROOM-1-N4R2 (Custom)",
+  "vendor": "Custom",
+  "url": "https://www.espressif.com/",
+  "build": {
+    "core": "esp32",
+    "mcu": "esp32s3",
+    "variant": "esp32s3",
+    "f_cpu": "240000000L",
+    "flash_mode": "dio",
+    "f_flash": "80000000L",
+    "flash_size": "4MB",
+    "boot": "dio",
+    "extra_flags": [
+      "-DARDUINO_USB_MODE=1",
+      "-DARDUINO_USB_CDC_ON_BOOT=1"
+    ]
+  },
+  "upload": {
+    "flash_size": "4MB",
+    "maximum_size": 4194304,
+    "maximum_ram_size": 327680,
+    "protocol": "esptool"
+  },
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}
