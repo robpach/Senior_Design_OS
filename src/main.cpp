@@ -109,8 +109,9 @@ int vacuum = 11;
 int cylinder = 12;
 
 // camera variable
-int camX = 0;
-int camY = 0;
+float camX[100];
+float camY[100];
+float receivedX, receivedY;
 char receivedBuffer[32];
 volatile bool newData = false;
 
@@ -309,17 +310,25 @@ void loop() {
 
     case Demo:
 
-    int newPoint = 0;
-    Serial.println("Demo running... ");
+    int receivedPoints = 0;
+
+    // add this if to the CommTask, create vectors for x and y
+    // add mutexes for receivedX and receivedY, keep camX and camY local
       if (newData) {
-        int parsed = sscanf(receivedBuffer, "X%d Y%d", &camX, &camY);
+        int parsed = sscanf(receivedBuffer, "X%d Y%d", &receivedX, &receivedY);
 
         if (parsed == 2) {  // sscanf returns how many variables it successfully filled
+          if (receivedX == 0 && receivedY == 0) {
+            Serial.println("No more points");
+            newData = false;
+          }
           Serial.print("Parsed successfully! X: ");
-          Serial.print(camX);
+          Serial.print(receivedX);
           Serial.print(" | Y: ");
-          Serial.println(camY);
-          newPoint = 1;
+          Serial.println(receivedY);
+          camX[receivedPoints] = receivedX;
+          camY[receivedPoints] = receivedY;
+          receivedPoints++;
         } else {
           Serial.println("Error: Message format was wrong.");
           currentState = Waiting;
@@ -327,10 +336,10 @@ void loop() {
         newData = false;  // Reset the flag for the next message
       }
 
-      if (newPoint) {
-        MoveTo(currentPosX, currentPosY, camX, camY);
-        currentPosX = camX;
-        currentPosY = camY;
+      for (int i = 0; i < receivedPoints; i++) {
+        MoveTo(currentPosX, currentPosY, camX[i], camY[i]);
+        currentPosX = camX[i];
+        currentPosY = camY[i];
         zAxis(1);
         delay(50);
         suction(1);
@@ -344,7 +353,6 @@ void loop() {
         suction(0);
         delay(50);
         zAxis(0);
-        newPoint = 0;
       }
       // Should we home first?
       //currentState = Waiting;
@@ -663,6 +671,10 @@ void inverseCalc(float Px, float Py, int i) {
 
 // Background task to handle serial communication and i2c data
 void CommTask(void* pvParameters) {
+  // i need to add the i2c receving ode here and add inside for(;;)
+  // i2c should send x and y positions until 0,0 is sent
+  // 
+
   String packetBuffer = "";
 
   for (;;) {  // Infinite loop for the task
@@ -691,7 +703,6 @@ void CommTask(void* pvParameters) {
         packetBuffer += c;
       }
     }
-    // Very short delay to let FreeRTOS manage other background tasks (like WiFi/Watchdog)
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
 }
