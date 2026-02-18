@@ -154,13 +154,17 @@ void inverseCalc(float x, float y, int pointNum);
 bool PositionChange1(int target);
 bool PositionChange2(int target);
 int radToPos(float radians);
+void countChangeA1();
+void countChangeB1();
+void countChangeA2();
+void countChangeB2();
+void receiveEvent(int howMany);
 
 void setup() {
 
   // SERIAL INITIALIZATION //
   Serial.begin(115200);
-  while (!Serial)
-    ;
+  //while (!Serial);
   delay(500);
   Serial2.begin(115200, SERIAL_8N1, 36, 37); // rx, tx
   Serial.println("System Online. Listening for other ESP32 on Pins 38/39...");
@@ -251,6 +255,9 @@ void loop() {
 
   switch (currentState) {
     case Waiting:
+
+      
+
       if (xSemaphoreTake(dataMutex, (TickType_t)10) == pdTRUE) {
         rx_x = latestData.x;
         rx_y = latestData.y;
@@ -653,5 +660,20 @@ void CommTask(void* pvParameters) {
     }
     // Very short delay to let FreeRTOS manage other background tasks (like WiFi/Watchdog)
     vTaskDelay(1 / portTICK_PERIOD_MS);
+  }
+}
+
+void linspace(float start, float end, int numPoints, float* output) {
+  if (numPoints <= 0) return;  
+
+  if (numPoints == 1) {
+    output[0] = start;
+    return;
+  }
+
+  float step = (end - start) / (numPoints - 1);
+  
+  for (int i = 0; i < numPoints; i++) {
+    output[i] = start + i * step;
   }
 }
