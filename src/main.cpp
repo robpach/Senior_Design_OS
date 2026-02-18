@@ -27,9 +27,20 @@ void CommTask(void* pvParameters);
 
 const float deg2rad = PI / 180;
 const float rad2deg = 180 / PI;
-const int maxPoints = 10;
+
+// Kinematic arrays
+const int maxPoints = 1000;
+float pointDensity = 50.0;
+float dist = 0.0;
+int pointCount = 0;
+float xPoints[maxPoints];
+float yPoints[maxPoints];
 double theta1[maxPoints];
 double THETA2[maxPoints];
+
+// Demo position parameters
+float carriageX = 0.0;
+float carriageY = 0.0; 
 
 // Position
 volatile float currentPosX = 0.0;
@@ -159,6 +170,9 @@ void countChangeB1();
 void countChangeA2();
 void countChangeB2();
 void receiveEvent(int howMany);
+void linspace(float start, float end, int numPoints, float* array);
+void CommTask(void* pvParameters);
+void MoveTo(float startX, float startY, float endX, float endY);
 
 void setup() {
 
@@ -295,24 +309,42 @@ void loop() {
 
     case Demo:
 
-    // NEED TO ADD LINSPACE FUNCTION HERE
-
+    int newPoint = 0;
     Serial.println("Demo running... ");
       if (newData) {
         int parsed = sscanf(receivedBuffer, "X%d Y%d", &camX, &camY);
 
         if (parsed == 2) {  // sscanf returns how many variables it successfully filled
-          // write an if statement here? or maybe te while(!updateposition | etc)
           Serial.print("Parsed successfully! X: ");
           Serial.print(camX);
           Serial.print(" | Y: ");
           Serial.println(camY);
+          newPoint = 1;
         } else {
           Serial.println("Error: Message format was wrong.");
           currentState = Waiting;
         }
-
         newData = false;  // Reset the flag for the next message
+      }
+
+      if (newPoint) {
+        MoveTo(currentPosX, currentPosY, camX, camY);
+        currentPosX = camX;
+        currentPosY = camY;
+        zAxis(1);
+        delay(50);
+        suction(1);
+        delay(50);
+        zAxis(0);
+        MoveTo(currentPosX, currentPosY, carriageX, carriageY);
+        currentPosX = carriageX;
+        currentPosY = carriageY;
+        zAxis(1);
+        delay(50);
+        suction(0);
+        delay(50);
+        zAxis(0);
+        newPoint = 0;
       }
       // Should we home first?
       //currentState = Waiting;
@@ -337,13 +369,13 @@ void loop() {
 
       // 3. Drive motors (NON-BLOCKING)
       bool arrived1 = PositionChange1(Setpoint1);
-      bool arrived2 = true;  //PositionChange2(Setpoint2);
+      bool arrived2 = PositionChange2(Setpoint2);
 
       // 4. Update pneumatics live
       zAxis(rx_a);
       suction(rx_s);
 
-      // 5. Only exit when the robot has caught up to the LATEST target
+      // 5. Only exit when the robot has caught up to the target
       if (arrived1 && arrived2) {
         Serial.println("Arrived at final target.");
         currentState = Waiting;
@@ -397,8 +429,8 @@ void HomeMotors() {
   suction(LOW);
   zAxis(LOW);
 
-  digitalWrite(motor1dir, HIGH);  // CW
-  digitalWrite(motor2dir, LOW);   // CCW
+  MotorDirection(1, HIGH);  // CW
+  MotorDirection(2, LOW);   // CCW
 
   while (!digitalRead(limit1)) {
     analogWrite(motor1PWM, 80);
@@ -629,6 +661,7 @@ void inverseCalc(float Px, float Py, int i) {
   }
 }
 
+// Background task to handle serial communication and i2c data
 void CommTask(void* pvParameters) {
   String packetBuffer = "";
 
@@ -663,6 +696,7 @@ void CommTask(void* pvParameters) {
   }
 }
 
+// Linear interpolation
 void linspace(float start, float end, int numPoints, float* output) {
   if (numPoints <= 0) return;  
 
@@ -672,8 +706,28 @@ void linspace(float start, float end, int numPoints, float* output) {
   }
 
   float step = (end - start) / (numPoints - 1);
-  
+
   for (int i = 0; i < numPoints; i++) {
     output[i] = start + i * step;
+  }
+}
+
+// Linear interpolates from start to end and moves the end effector
+void MoveTo(float startX, float startY, float endX, float endY) { 
+  dist = sqrt(pow((endX - startX), 2) + pow((endY - startY), 2));
+  pointCount = int(dist * pointDensity);
+  linspace(startX, endX, pointCount, xPoints);
+  linspace(startY, endY, pointCount, yPoints);
+  for (int i = 0; i < pointCount; i++) {
+    inverseCalc(xPoints[i], yPoints[i], i);
+    Setpoint1 = constrain(radToPos(theta1[i]), minPos1, maxPos1);
+    Setpoint2 = constrain(radToPos(THETA2[i]), minPos2, maxPos2);
+    bool arrived1 = PositionChange1(Setpoint1);
+    bool arrived2 = PositionChange2(Setpoint2);
+    while (!arrived1 || !arrived2) {
+      arrived1 = PositionChange1(Setpoint1);
+      arrived2 = PositionChange2(Setpoint2);
+      vTaskDelay(1 / portTICK_PERIOD_MS);  // Short delay to prevent CPU hogging
+    }
   }
 }
