@@ -41,6 +41,7 @@ double THETA2[maxPoints];
 // Demo position parameters
 float carriageX = 0.0;
 float carriageY = 0.0; 
+int receivedPoints = 0;
 
 // Position
 volatile float currentPosX = 0.0;
@@ -101,12 +102,12 @@ int motor2enableA = 8;
 int motor2enableB = 10;
 
 // Limit switches
-int limit1 = 13;  // this limit is for theta1
-int limit2 = 8;   // this limit is for theta2
+int limit1;  // this limit is for theta1
+int limit2;   // this limit is for theta2
 
 // z-axis and suction
-int vacuum = 11;
-int cylinder = 12;
+int vacuum = 1;
+int cylinder = 2;
 
 // camera variable
 float camX[100];
@@ -255,7 +256,22 @@ void setup() {
 }
 
 void loop() {
-  // This Section is for reading Serial Data
+  
+  /* Debugging statement
+  while (true) {
+    MotorDirection(1, LOW);
+    analogWrite(motor1PWM, 20);
+    Serial.print("Position 1: ");
+    Serial.print(position1);
+    Serial.print(" | Position 2: ");
+    Serial.print(position2);
+    Serial.print(" | X: ");
+    Serial.print(latestData.x);
+    Serial.print(" | Y: ");
+    Serial.println(latestData.y);
+    delay(1000);
+  }
+    */
 
   // implement a failsafe on the angular position of the motors
   /*if (position1 < minPos1) {
@@ -293,6 +309,10 @@ void loop() {
           last_rx_y = rx_y;
           last_rx_a = rx_a;
           last_rx_s = rx_s;
+          Serial.print("Received X: ");
+          Serial.print(rx_x);
+          Serial.print(" Y: ");
+          Serial.print(rx_y);
           currentState = Moving;
         }
       }
@@ -310,7 +330,6 @@ void loop() {
 
     case Demo:
 
-    int receivedPoints = 0;
 
     // add this if to the CommTask, create vectors for x and y
     // add mutexes for receivedX and receivedY, keep camX and camY local
@@ -376,22 +395,25 @@ void loop() {
       Setpoint2 = constrain(radToPos(THETA2[1]), minPos2, maxPos2);
 
       // 3. Drive motors (NON-BLOCKING)
-      bool arrived1 = PositionChange1(Setpoint1);
-      bool arrived2 = PositionChange2(Setpoint2);
+      bool arrive1 = PositionChange1(Setpoint1);
+      bool arrive2 = PositionChange2(Setpoint2);
 
       // 4. Update pneumatics live
       zAxis(rx_a);
       suction(rx_s);
 
       // 5. Only exit when the robot has caught up to the target
-      if (arrived1 && arrived2) {
-        Serial.println("Arrived at final target.");
-        currentState = Waiting;
+      while (!arrive1 || !arrive2) {
+        arrive1 = PositionChange1(Setpoint1);
+        arrive2 = PositionChange2(Setpoint2);
+        zAxis(rx_a);
+        suction(rx_s);
+        vTaskDelay(5 / portTICK_PERIOD_MS);
       }
 
       static uint32_t lastPrintTime = 0;
 
-      if (millis() - lastPrintTime > 100) {  // Only print 10 times per second
+      if (millis() - lastPrintTime > 200) {  // Only print 10 times per second
         Serial.print("T1: ");
         Serial.print(theta1[1]);
         Serial.print(" T2: ");
@@ -493,16 +515,16 @@ bool PositionChange1(int target) {
   PID1.Compute();
   MotorDirection(1, Output1 >= 0 ? HIGH : LOW);
   analogWrite(motor1PWM, abs(Output1));
-
+  
   if (abs(position1 - target) <= 5) {
     analogWrite(motor1PWM, 0);
     Output1 = 0;
     //PrintStats1();
     return true;
   }
-
-  if (Output1 != 0 && abs(Output1) < 9) {  // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
-    Output1 = (Output1 > 0) ? 10 : -10;
+  
+  if (Output1 != 0 && abs(Output1) < 19) {  // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
+    Output1 = (Output1 >= 0) ? 15 : -15;
   }
   //PrintStats1();
   return false;
@@ -522,31 +544,31 @@ bool PositionChange2(int target) {
     return true;
   }
 
-  if (Output2 != 0 && abs(Output2) < 9) {  // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
-    Output2 = (Output2 > 0) ? 10 : -10;
+  if (Output2 != 0 && abs(Output2) < 19) {  // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
+    Output2 = (Output2 >= 0) ? 15 : -15;
   }
   //PrintStats2();
   return false;
 }
 
 void countChangeA1() {
-  if (digitalRead(motor1encB) != digitalRead(motor1encA)) position1--;
-  else position1++;
+  if (digitalRead(motor1encB) != digitalRead(motor1encA)) position1++;
+  else position1--;
 }
 
 void countChangeB1() {
-  if (digitalRead(motor1encB) == digitalRead(motor1encA)) position1--;
-  else position1++;
+  if (digitalRead(motor1encB) == digitalRead(motor1encA)) position1++;
+  else position1--;
 }
 
 void countChangeA2() {
-  if (digitalRead(motor2encB) != digitalRead(motor2encA)) position2--;
-  else position2++;
+  if (digitalRead(motor2encB) != digitalRead(motor2encA)) position2++;
+  else position2--;
 }
 
 void countChangeB2() {
-  if (digitalRead(motor2encB) == digitalRead(motor2encA)) position2--;
-  else position2++;
+  if (digitalRead(motor2encB) == digitalRead(motor2encA)) position2++;
+  else position2--;
 }
 
 int angleToPos(int ang) {
@@ -638,9 +660,12 @@ void inverseCalc(float Px, float Py, int i) {
   float gamma = atan2((L2 + d) * sin(theta2), L1 + r1 + ((L2 + d) * cos(theta2)));
   theta1[i] = beta - gamma;
 
+  /*
   if (theta1[i] < 0) {
     theta1[i] += 2 * PI;
   }
+  */
+
   // RRRR Inverse Kinematics; d = 0
   A2 = 2 * r2 * (-r1 - r4 * cos(theta2));
   B2 = -2 * r2 * r4 * sin(theta2);
@@ -664,9 +689,11 @@ void inverseCalc(float Px, float Py, int i) {
     THETA2[i] = 2.0 * atan(u3);
   }
 
+  /*
   if (THETA2[i] < 0) {
     THETA2[i] += 2 * PI;
   }
+  */
 }
 
 // Background task to handle serial communication and i2c data
@@ -738,7 +765,7 @@ void MoveTo(float startX, float startY, float endX, float endY) {
     while (!arrived1 || !arrived2) {
       arrived1 = PositionChange1(Setpoint1);
       arrived2 = PositionChange2(Setpoint2);
-      vTaskDelay(1 / portTICK_PERIOD_MS);  // Short delay to prevent CPU hogging
+      vTaskDelay(5 / portTICK_PERIOD_MS);  // Short delay to prevent CPU hogging
     }
   }
 }
