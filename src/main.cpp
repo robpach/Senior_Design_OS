@@ -85,7 +85,7 @@ INB - GPIO11 X
 
 // motor1 - the motor that controls theta1
 int motor1PWM = 6;
-int motor1dirA = 4;  // HIGH is Clockwise
+int motor1dirA = 4;  // HIGH is Clockwise, increases position1
 int motor1dirB = 16;  
 int motor1encA = 13;
 int motor1encB = 14;
@@ -94,7 +94,7 @@ int motor1enableB = 15;
 
 // motor2 - the motor that controls theta2
 int motor2PWM = 3;
-int motor2dirA = 17;  // HIGH is Clockwise
+int motor2dirA = 17;  // HIGH is Clockwise, increases position2
 int motor2dirB = 11;
 int motor2encA = 47; 
 int motor2encB = 48;
@@ -143,6 +143,8 @@ QuickPID PID1(&Input1, &Output1, &Setpoint1);
 // motor 2
 float Input2, Output2, Setpoint2;
 QuickPID PID2(&Input2, &Output2, &Setpoint2);
+// speed scaling factor for PID output, between 0 and 1
+float speedScale = 0.8;
 
 // Serial
 int rx_x, rx_y, rx_a, rx_s, rx_h, rx_d;
@@ -273,21 +275,8 @@ void loop() {
   }
     */
 
-  // implement a failsafe on the angular position of the motors
-  /*if (position1 < minPos1) {
-    Serial.println("Motor 1 Minimum Position Exceeded");
-  } else if (position1 > maxPos1) {
-    Serial.println("Motor 1 Maximum Position Exceeded");
-  } else if (position2 < minPos2) {
-    Serial.println("Motor 2 Minimum Position Exceeded");
-  } else if (position2 > maxPos2) {
-    Serial.println("Motor 2 Maximum Position Exceeded");
-  }*/
-
   switch (currentState) {
     case Waiting:
-
-      
 
       if (xSemaphoreTake(dataMutex, (TickType_t)10) == pdTRUE) {
         rx_x = latestData.x;
@@ -330,8 +319,7 @@ void loop() {
 
     case Demo:
 
-
-    // add this if to the CommTask, create vectors for x and y
+    // add this if statement to the CommTask, create vectors for x and y
     // add mutexes for receivedX and receivedY, keep camX and camY local
       if (newData) {
         int parsed = sscanf(receivedBuffer, "X%d Y%d", &receivedX, &receivedY);
@@ -356,29 +344,36 @@ void loop() {
       }
 
       for (int i = 0; i < receivedPoints; i++) {
+        
+        // move from current position to chip position and pick up
         MoveTo(currentPosX, currentPosY, camX[i], camY[i]);
         currentPosX = camX[i];
         currentPosY = camY[i];
+        delay(50);
         zAxis(1);
         delay(50);
         suction(1);
         delay(50);
         zAxis(0);
+
+        // move to carriage and drop off
         MoveTo(currentPosX, currentPosY, carriageX, carriageY);
         currentPosX = carriageX;
         currentPosY = carriageY;
+        delay(50);
         zAxis(1);
         delay(50);
         suction(0);
         delay(50);
         zAxis(0);
+
       }
       // Should we home first?
       //currentState = Waiting;
       break;
 
     case Moving:
-      // 1. PEEK at the latest data from Core 0 EVERY loop cycle
+      // 1. look at the latest data from Core 0 EVERY loop cycle
       if (xSemaphoreTake(dataMutex, (TickType_t)0) == pdTRUE) {
         rx_x = latestData.x;
         rx_y = latestData.y;
@@ -387,7 +382,7 @@ void loop() {
         xSemaphoreGive(dataMutex);
       }
 
-      // 2. Update the goal in real-time
+      // 2. Update the target in real-time, which ignores previous target then
       updatePosition(rx_x, rx_y);
       inverseCalc(currentPosX, currentPosY, 1);
 
@@ -427,7 +422,6 @@ void loop() {
       break;
   }
 }
-
 
 
 // FUNCTION DEFINITIONS //
@@ -473,6 +467,7 @@ void HomeMotors() {
   }
   analogWrite(motor2PWM, 0);
   position2 = 0;*/
+
   Serial.println("Homing Disabled, re-enable for proper function");
   rx_h = 0;
 }
@@ -514,6 +509,21 @@ bool PositionChange1(int target) {
   Input1 = position1;
   PID1.Compute();
   MotorDirection(1, Output1 >= 0 ? HIGH : LOW);
+
+  /* stops the motor based on the bounds
+  if (position1 < minPos1) {
+    Serial.println("Motor 1 Minimum Position Exceeded");
+    Output1 = 0;
+    analogWrite(motor1PWM, 0);
+    return true; 
+  } else if (position1 > maxPos1) {
+    Serial.println("Motor 1 Maximum Position Exceeded");
+    Output1 = 0;
+    analogWrite(motor1PWM, 0);
+    return true;
+  }
+  */
+  Output1 = Output1 * speedScale;
   analogWrite(motor1PWM, abs(Output1));
   
   if (abs(position1 - target) <= 5) {
@@ -535,6 +545,21 @@ bool PositionChange2(int target) {
   Input2 = position2;
   PID2.Compute();
   MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
+
+  /* stops motor based on the bounds
+  if (position2 < minPos2) {
+    Serial.println("Motor 2 Minimum Position Exceeded");
+    Output2 = 0;
+    analogWrite(motor2PWM, 0);
+    return true; 
+  } else if (position2 > maxPos2) {
+    Serial.println("Motor 2 Maximum Position Exceeded");
+    Output2 = 0;
+    analogWrite(motor2PWM, 0);
+    return true; 
+  }
+  */
+  Output2 = Output2 * speedScale;
   analogWrite(motor2PWM, abs(Output2));
 
   if (abs(position2 - target) <= 0) {
@@ -698,7 +723,7 @@ void inverseCalc(float Px, float Py, int i) {
 
 // Background task to handle serial communication and i2c data
 void CommTask(void* pvParameters) {
-  // i need to add the i2c receving ode here and add inside for(;;)
+  // i need to add the i2c receving code here and add inside for(;;)
   // i2c should send x and y positions until 0,0 is sent
   // 
 
