@@ -85,6 +85,28 @@ ENB - GPIO10 X
 INB - GPIO11 X
 */
 
+/* NEW PINOUT ASSIGNMENTS:
+Homing switches (normally LOW): GPIO01 now A0, GPIO2 now A1
+ 
+High current switch (vacuum motor on/off): GPIO38 now A5
+ 
+Motor Driver A:
+INA - GPIO4 now SCK
+ENA - GPIO5 now MOSI
+PWM - GPIO6 now MISO
+CS - GPIO7 now D5
+ENB - GPIO15 now D6
+INB - GPIO16 now D9
+ 
+Motor Driver B:
+INA - GPIO17 now D10
+ENA - GPIO8 now D11
+PWM - GPIO3 now d16
+CS - GPIO9 now  d17
+ENB - GPIO10 now d12
+INB - GPIO11 now d13
+*/
+
 // motor1 - the motor that controls theta1
 int motor1PWM = 6;
 int motor1dirA = 4; // HIGH always increases position1, if black top and red bottom then moves CCW
@@ -104,8 +126,8 @@ int motor2enableA = 8;
 int motor2enableB = 10;
 
 // Limit switches
-int limit1 = 1; // this limit is for theta1
-int limit2 = 2; // this limit is for theta2
+int limit1 = A0; // this limit is for theta1
+int limit2 = A1; // this limit is for theta2
 
 // z-axis and suction
 int vacuum = 38;
@@ -150,6 +172,7 @@ QuickPID PID2(&Input2, &Output2, &Setpoint2);
 
 // speed scaling factor for PID output, between 0 and 1
 float speedScale = 0.8;
+// I can also change pointDensity to affect smoothness/speed
 
 // Serial
 int rx_x, rx_y, rx_a, rx_s, rx_h, rx_d;
