@@ -63,7 +63,7 @@ float L1 = 0.3;    //
 float L2 = r4 * 2; // 0.15942
 float theta2_max = 160 * deg2rad;
 
-/*
+/* OLD PINOUT ASSIGNMENTS:
 Homing switches (normally LOW): GPIO01, GPIO2
 
 High current switch (vacuum motor on/off): GPIO38
@@ -91,9 +91,9 @@ Homing switches (normally LOW): GPIO01 now A0, GPIO2 now A1
 High current switch (vacuum motor on/off): GPIO38 now A5
  
 Motor Driver A:
-INA - GPIO4 now SCK
-ENA - GPIO5 now MOSI
-PWM - GPIO6 now MISO
+INA - GPIO4 now SCK (36)
+ENA - GPIO5 now MOSI (35)
+PWM - GPIO6 now MISO (37)
 CS - GPIO7 now D5
 ENB - GPIO15 now D6
 INB - GPIO16 now D9
@@ -108,29 +108,29 @@ INB - GPIO11 now d13
 */
 
 // motor1 - the motor that controls theta1
-int motor1PWM = 6;
-int motor1dirA = 4; // HIGH always increases position1, if black top and red bottom then moves CCW
-int motor1dirB = 16;
-int motor1encA = 13;
-int motor1encB = 14;
-int motor1enableA = 5;
-int motor1enableB = 15;
+int motor1PWM = 37;
+int motor1dirA = 36; // HIGH always increases position1, if black top and red bottom then moves CCW
+int motor1dirB = 9;
+int motor1encA = ; // solder these onto esp32
+int motor1encB = ; 
+int motor1enableA = 35;
+int motor1enableB = 6;
 
 // motor2 - the motor that controls theta2
-int motor2PWM = 3;
-int motor2dirA = 17; // HIGH always increases position2, if red top and black bottom then moves CCW
-int motor2dirB = 11;
-int motor2encA = 47;
-int motor2encB = 48;
-int motor2enableA = 8;
-int motor2enableB = 10;
+int motor2PWM = 16;
+int motor2dirA = 10; // HIGH always increases position2, if red top and black bottom then moves CCW
+int motor2dirB = 13;
+int motor2encA = ; // solder these onto esp32
+int motor2encB = ;
+int motor2enableA = 11;
+int motor2enableB = 12;
 
 // Limit switches
 int limit1 = A0; // this limit is for theta1
 int limit2 = A1; // this limit is for theta2
 
 // z-axis and suction
-int vacuum = 38;
+int vacuum = A5;
 int cylinder = 35; // ?
 
 // camera variable
