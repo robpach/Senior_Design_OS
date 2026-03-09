@@ -131,7 +131,7 @@ int limit2 = A1; // this limit is for theta2
 
 // z-axis and suction
 int vacuum = A5;
-int cylinder = 35; // ?
+int cylinder = ; // make this the DB pin or one of the i2c pins from the extender
 
 // camera variable
 float camX[100];
@@ -305,7 +305,7 @@ void loop()
     Serial.println(latestData.y);
     delay(1000);
   }
-    */
+  */
 
   switch (currentState)
   {
@@ -553,8 +553,13 @@ void updatePosition(int x, int y)
 
 bool PositionChange1(int target)
 {
+  // add a condition to check the value of current sense pin
+  // do some testing to check the normal level of current, then find the stall current
+  // stall current should be 5.5 A, and the CS pin does 140mV per amp
+  // therefore 0.77 volts should be the stall threshold, but lets say 0.7 volts to be safe
+  // 0.7/3.3 * 4095 = 869, this is the Analog inut threshold. 
+  // if either motor reads above 869 on CS pin, call Stop();
 
-  // check for serial data here, then go back to waiting
   Setpoint1 = target;
   Input1 = position1;
   PID1.Compute();
@@ -594,6 +599,8 @@ bool PositionChange1(int target)
 
 bool PositionChange2(int target)
 {
+  // add a condition to check the value of current sense pin
+
   Setpoint2 = target;
   Input2 = position2;
   PID2.Compute();
@@ -703,6 +710,8 @@ void Stop()
   delay(200);
   digitalWrite(cylinder, LOW);
   */
+  Serial.println("Stopped.");
+  currentState = Waiting;
 }
 
 void receiveEvent(int howMany)
