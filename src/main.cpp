@@ -11,9 +11,13 @@ There is option for a homing sequence, demo sequence, and manual control
 #include <Arduino.h>
 #include <QuickPID.h>
 #include <Wire.h>
+#include <Adafruit_PCF8574.h> // might be 5 instead fo 4 at the end
 
 // I2C Address for raspberry pi
 #define I2C_ADDR 0x08 // might change
+
+// Intitialize the GPIO expansion
+Adafruit_PCF8574 pcf;
 
 // Mutex and Multithreading
 SemaphoreHandle_t dataMutex;
@@ -106,32 +110,72 @@ CS - GPIO9 now  d17
 ENB - GPIO10 now d12
 INB - GPIO11 now d13
 */
+/////////////////////////////////
+/* PINOUT as of 3/9/2026
+Homing switches (normally LOW): 
+sw1 - RX (38)
+sw2 - TX (39)
+ 
+On-board high current switch:
+vacuum control - P6 
+ 
+Motor Driver (VNH5019ATR-E) A:
+INA - P5 
+ENA - P1
+PWM - A4 (14)
+CS -A5 (8)
+ENB - SCK (36)
+INB - MO (35)
+ 
+Motor Driver (VNH5019ATR-E) B:
+INA -  P4
+ENA - P2   
+PWM - MI (37)
+CS - D5 
+ENB - D6
+INB - D9
+ 
+Encoder A:
+white - A0 (18) B
+yellow - A1 (17) A
+ 
+Encoder B:
+white - A2 (16) B
+yellow - A3 (15) A
+*/
+/*pcf list
+motor1dirA
+motor1enableA
+motor2dirA
+motor2enableA
+vacuum
+*/
 
 // motor1 - the motor that controls theta1
-int motor1PWM = 37;
-int motor1dirA = 36; // HIGH always increases position1, if black top and red bottom then moves CCW
-int motor1dirB = 9;
-int motor1encA = ; // solder these onto esp32
-int motor1encB = ; 
-int motor1enableA = 35;
+int motor1PWM = 14;
+int motor1dirA = 5; //PCF // HIGH always increases position1, if black top and red bottom then moves CCW
+int motor1dirB = 35;
+int motor1encA = 18; // solder these onto esp32
+int motor1encB = 17; 
+int motor1enableA = 1; // PCF
 int motor1enableB = 6;
 
 // motor2 - the motor that controls theta2
-int motor2PWM = 16;
-int motor2dirA = 10; // HIGH always increases position2, if red top and black bottom then moves CCW
-int motor2dirB = 13;
-int motor2encA = ; // solder these onto esp32
-int motor2encB = ;
-int motor2enableA = 11;
-int motor2enableB = 12;
+int motor2PWM = 37;
+int motor2dirA = 4; // PCF // HIGH always increases position2, if red top and black bottom then moves CCW
+int motor2dirB = 9;
+int motor2encA = 15; // solder these onto esp32
+int motor2encB = 16;
+int motor2enableA = 2; // PCF
+int motor2enableB = 6;
 
 // Limit switches
-int limit1 = A0; // this limit is for theta1
-int limit2 = A1; // this limit is for theta2
+int limit1 = 38; // this limit is for theta1
+int limit2 = 39; // this limit is for theta2
 
 // z-axis and suction
-int vacuum = A5;
-int cylinder = ; // make this the DB pin or one of the i2c pins from the extender
+int vacuum = 6; // PCF
+int cylinder = 11; // or 13 // make this the DB pin or one of the i2c pins from the extender
 
 // camera variable
 float camX[100];
@@ -213,46 +257,67 @@ void setup()
   Serial.begin(115200);
   // while (!Serial);
   delay(500);
-  Serial2.begin(115200, SERIAL_8N1, 36, 37); // rx, tx
+  Serial2.begin(115200, SERIAL_8N1, 10, 12); // rx, tx
   Serial.println("System Online. Listening for other ESP32 on Pins 38/39...");
 
+  // Built in LED
+  pinMode(LED_BUILTIN, OUTPUT);
+
   // I2C initialization
-  Wire.begin(I2C_ADDR);
+  Wire.begin(); // I2C_ADDR is slave address
   Wire.onReceive(receiveEvent);
 
+  // PCF initialization
+  if (!pcf.begin(0x36, &Wire)) {
+    Serial.println("Couldn't find PCF8574");
+  }
+  Serial.println("PCF connected");
   // PIN INITIALIZATION //
 
+  /*pcf list
+  motor1dirA X
+  motor1enableA X
+  motor2dirA X
+  motor2enableA X
+  vacuum
+  */
+ 
   // motor 1
   pinMode(motor1PWM, OUTPUT);
-  pinMode(motor1dirA, OUTPUT);
+  pcf.pinMode(motor1dirA, OUTPUT);
   pinMode(motor1dirB, OUTPUT);
   pinMode(motor1encA, INPUT_PULLDOWN);
   pinMode(motor1encB, INPUT_PULLDOWN);
 
-  pinMode(motor1enableA, OUTPUT);
+  pcf.pinMode(motor1enableA, OUTPUT);
   pinMode(motor1enableB, OUTPUT);
-  digitalWrite(motor1enableA, HIGH);
+  pcf.digitalWrite(motor1enableA, HIGH);
   digitalWrite(motor1enableB, HIGH);
-  digitalWrite(motor1dirA, HIGH);
+  pcf.digitalWrite(motor1dirA, HIGH);
   digitalWrite(motor1dirB, LOW);
 
   // motor 2
   pinMode(motor2PWM, OUTPUT);
-  pinMode(motor2dirA, OUTPUT);
+  pcf.pinMode(motor2dirA, OUTPUT);
   pinMode(motor2dirB, OUTPUT);
   pinMode(motor2encA, INPUT_PULLDOWN);
   pinMode(motor2encB, INPUT_PULLDOWN);
 
-  pinMode(motor2enableA, OUTPUT);
+  pcf.pinMode(motor2enableA, OUTPUT);
   pinMode(motor2enableB, OUTPUT);
-  digitalWrite(motor2enableA, HIGH);
+  pcf.digitalWrite(motor2enableA, HIGH);
   digitalWrite(motor2enableB, HIGH);
-  digitalWrite(motor2dirA, HIGH);
+  pcf.digitalWrite(motor2dirA, HIGH);
   digitalWrite(motor2dirB, LOW);
 
   // limit switches
   pinMode(limit1, INPUT_PULLDOWN);
   pinMode(limit2, INPUT_PULLDOWN);
+
+  // suction and actuation
+  pcf.pinMode(vacuum, OUTPUT);
+  pinMode(cylinder, OUTPUT);
+
 
   // ATTACHING INTERRUPTS //
   attachInterrupt(digitalPinToInterrupt(motor1encA), countChangeA1, CHANGE);
@@ -291,21 +356,69 @@ void setup()
 void loop()
 {
 
-  /* Debugging statement
-  while (true) {
-    MotorDirection(1, LOW);
-    analogWrite(motor1PWM, 20);
-    Serial.print("Position 1: ");
-    Serial.print(position1);
-    Serial.print(" | Position 2: ");
-    Serial.print(position2);
-    Serial.print(" | X: ");
-    Serial.print(latestData.x);
-    Serial.print(" | Y: ");
-    Serial.println(latestData.y);
+  /* Debugging statement */
+  /*while (true) {
+    MotorDirection(1, HIGH);
+    analogWrite(motor1PWM, 30);
     delay(1000);
+    analogWrite(motor1PWM, 0);
+    delay(200);
+    MotorDirection(1, LOW);
+    analogWrite(motor1PWM, 30);
+    delay(1000);
+  }*/
+
+  while (true) {
+    MotorDirection(1, HIGH);
+    analogWrite(motor1PWM, 30);
+    delay(1000);
+    
+    analogWrite(motor1PWM, 0);
+    delay(200);
+
+    MotorDirection(1, LOW);
+    analogWrite(motor1PWM, 30);
+    delay(1000);
+
+    analogWrite(motor1PWM, 0);
+    delay(200);
   }
-  */
+
+  /*while (true) {
+    Serial.println("switched to LOW");
+    pcf.digitalWrite(motor1dirA, LOW);
+    bool dirAState = pcf.digitalRead(motor1dirA);
+    Serial.print("DirA: ");
+    Serial.println(dirAState);
+    digitalWrite(LED_BUILTIN, dirAState);
+    delay(1000);
+    Serial.println("switched to HIGH");
+    pcf.digitalWrite(motor1dirA, HIGH);
+    dirAState = pcf.digitalRead(motor1dirA);
+    Serial.print("DirA: ");
+    Serial.println(dirAState);
+    digitalWrite(LED_BUILTIN, dirAState);
+    delay(1000);
+  }*/
+
+  /*while (true) {
+    bool dirAState = pcf.digitalRead(motor1dirA);
+    Serial.println("switched to HIGH");
+    MotorDirection(1,HIGH);
+    delay(10);
+    Serial.print("DirA: ");
+    dirAState = pcf.digitalRead(motor1dirA);
+    Serial.println(dirAState);
+    delay(1000);
+    Serial.println("switched to LOW");
+    MotorDirection(1,LOW);
+    delay(10);
+    Serial.print("DirA: ");
+    dirAState = pcf.digitalRead(motor1dirA);
+    Serial.println(dirAState);
+    delay(1000);
+  }*/
+  
 
   switch (currentState)
   {
@@ -459,12 +572,12 @@ void MotorDirection(int motor, int direction)
   {
     if (direction == HIGH)
     {
-      digitalWrite(motor1dirA, HIGH);
+      pcf.digitalWrite(motor1dirA, HIGH);
       digitalWrite(motor1dirB, LOW);
     }
     else
     {
-      digitalWrite(motor1dirA, LOW);
+      pcf.digitalWrite(motor1dirA, LOW);
       digitalWrite(motor1dirB, HIGH);
     }
   }
@@ -472,12 +585,12 @@ void MotorDirection(int motor, int direction)
   {
     if (direction == HIGH)
     {
-      digitalWrite(motor2dirA, HIGH);
+      pcf.digitalWrite(motor2dirA, HIGH);
       digitalWrite(motor2dirB, LOW);
     }
     else
     {
-      digitalWrite(motor2dirA, LOW);
+      pcf.digitalWrite(motor2dirA, LOW);
       digitalWrite(motor2dirB, HIGH);
     }
   }
@@ -532,12 +645,12 @@ void suction(int toggleS)
 
   if (toggleS == 1)
   {
-    digitalWrite(vacuum, HIGH);
+    pcf.digitalWrite(vacuum, HIGH);
     // Serial.println("Suction On");
   }
   else if (toggleS == 0)
   {
-    digitalWrite(vacuum, LOW);
+    pcf.digitalWrite(vacuum, LOW);
     // Serial.println("Suction Off");
   }
 }
@@ -706,7 +819,7 @@ void Stop()
   analogWrite(motor1PWM, LOW);
   analogWrite(motor2PWM, LOW);
   /*
-  digitalWrite(vacuum, LOW);
+  pcf.digitalWrite(vacuum, LOW);
   delay(200);
   digitalWrite(cylinder, LOW);
   */
@@ -857,7 +970,7 @@ void CommTask(void *pvParameters)
     }
 
     
-
+    /*
     if (newData)
     {
       int parsed = sscanf(receivedBuffer, "X%d Y%d", &receivedX, &receivedY);
@@ -892,7 +1005,7 @@ void CommTask(void *pvParameters)
         Serial.println("Error: Message format was wrong.");
       }
       newData = false; // Reset the flag for the next message
-    }
+    }*/
 
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
