@@ -50,8 +50,8 @@ int receivedPoints = 0;
 // Position
 volatile float currentPosX = 0.0;
 volatile float currentPosY = 0.5;
-int last_rx_x = -999;
-int last_rx_y = -999;
+int last_rx_x = 0;
+int last_rx_y = 0;
 int last_rx_a = 0;
 int last_rx_s = 0;
 
@@ -153,20 +153,20 @@ vacuum
 
 // motor1 - the motor that controls theta1
 int motor1PWM = 14;
-int motor1dirA = 5; //PCF // HIGH always increases position1, if black top and red bottom then moves CCW
+int motor1dirA = 4; //PCF // HIGH always increases position1, if black top and red bottom then moves CCW
 int motor1dirB = 35;
 int motor1encA = 18; // solder these onto esp32
 int motor1encB = 17; 
-int motor1enableA = 1; // PCF
+int motor1enableA = 0; // PCF
 int motor1enableB = 6;
 
 // motor2 - the motor that controls theta2
 int motor2PWM = 37;
-int motor2dirA = 4; // PCF // HIGH always increases position2, if red top and black bottom then moves CCW
+int motor2dirA = 3; // PCF // HIGH always increases position2, if red top and black bottom then moves CCW
 int motor2dirB = 9;
 int motor2encA = 15; // solder these onto esp32
 int motor2encB = 16;
-int motor2enableA = 2; // PCF
+int motor2enableA = 1; // PCF
 int motor2enableB = 6;
 
 // Limit switches
@@ -174,7 +174,7 @@ int limit1 = 38; // this limit is for theta1
 int limit2 = 39; // this limit is for theta2
 
 // z-axis and suction
-int vacuum = 6; // PCF
+int vacuum = 5; // PCF
 int cylinder = 11; // or 13 // make this the DB pin or one of the i2c pins from the extender
 
 // camera variable
@@ -204,7 +204,7 @@ float homePosY = 0.5; // 0
 
 // PID PARAMETERS //
 
-float Kp = 0.18, Ki = 0.0, Kd = 0.006;
+float Kp = 0.15, Ki = 0.0005, Kd = 0.006;
 
 // motor 1
 float Input1, Output1, Setpoint1;
@@ -256,20 +256,21 @@ void setup()
   // SERIAL INITIALIZATION //
   Serial.begin(115200);
   // while (!Serial);
-  delay(500);
+  delay(1000);
   Serial2.begin(115200, SERIAL_8N1, 10, 12); // rx, tx
-  Serial.println("System Online. Listening for other ESP32 on Pins 38/39...");
+  Serial.println("System Online. Listening for other ESP32 on Pins 10/12...");
 
   // Built in LED
   pinMode(LED_BUILTIN, OUTPUT);
 
   // I2C initialization
   Wire.begin(); // I2C_ADDR is slave address
-  Wire.onReceive(receiveEvent);
+  //Wire.onReceive(receiveEvent);
 
   // PCF initialization
-  if (!pcf.begin(0x36, &Wire)) {
+  while (!pcf.begin(0x20, &Wire)) {
     Serial.println("Couldn't find PCF8574");
+    delay(100);
   }
   Serial.println("PCF connected");
   // PIN INITIALIZATION //
@@ -318,6 +319,9 @@ void setup()
   pcf.pinMode(vacuum, OUTPUT);
   pinMode(cylinder, OUTPUT);
 
+  // i2c lines
+  pinMode(21, INPUT_PULLUP);
+  pinMode(22, INPUT_PULLUP);
 
   // ATTACHING INTERRUPTS //
   attachInterrupt(digitalPinToInterrupt(motor1encA), countChangeA1, CHANGE);
@@ -356,33 +360,20 @@ void setup()
 void loop()
 {
 
-  /* Debugging statement */
+  /* Debugging statements */
+  /*while (true) {
+    MotorDirection(2, HIGH);
+    analogWrite(motor2PWM, 30);
+    Serial2.println(position2);
+    delay(100);
+  }*/
+
   /*while (true) {
     MotorDirection(1, HIGH);
     analogWrite(motor1PWM, 30);
-    delay(1000);
-    analogWrite(motor1PWM, 0);
-    delay(200);
-    MotorDirection(1, LOW);
-    analogWrite(motor1PWM, 30);
-    delay(1000);
+    Serial2.println(position1);
+    delay(100);
   }*/
-
-  while (true) {
-    MotorDirection(1, HIGH);
-    analogWrite(motor1PWM, 30);
-    delay(1000);
-    
-    analogWrite(motor1PWM, 0);
-    delay(200);
-
-    MotorDirection(1, LOW);
-    analogWrite(motor1PWM, 30);
-    delay(1000);
-
-    analogWrite(motor1PWM, 0);
-    delay(200);
-  }
 
   /*while (true) {
     Serial.println("switched to LOW");
@@ -475,7 +466,7 @@ void loop()
     // we will be using the batch method, send all data points, then move
     if (!allPointsReceived)
     {
-      vTaskDelay(100 / portTICK_PERIOD_MS);
+      vTaskDelay(10 / portTICK_PERIOD_MS);
     }
     else
     {
@@ -550,14 +541,14 @@ void loop()
 
     if (millis() - lastPrintTime > 200)
     { // Only print 10 times per second
-      Serial.print("T1: ");
-      Serial.print(theta1[1]);
-      Serial.print(" T2: ");
-      Serial.print(THETA2[1]);
-      Serial.print(" X: ");
-      Serial.print(currentPosX);
-      Serial.print(" Y: ");
-      Serial.println(currentPosY);
+      Serial2.print("T1: ");
+      Serial2.print(theta1[1]);
+      Serial2.print(" T2: ");
+      Serial2.print(THETA2[1]);
+      Serial2.print(" X: ");
+      Serial2.print(currentPosX);
+      Serial2.print(" Y: ");
+      Serial2.println(currentPosY);
       lastPrintTime = millis();
     }
     break;
@@ -599,7 +590,7 @@ void MotorDirection(int motor, int direction)
 void HomeMotors()
 {
 
-  /*Serial.println("Homing... ");
+  /*Serial2.println("Homing... ");
 
   suction(LOW);
   zAxis(LOW);
@@ -622,6 +613,7 @@ void HomeMotors()
   Serial.println("Homing Disabled, re-enable for proper function");
   position1 = 0;
   position2 = 0;
+
   rx_h = 0;
 }
 
@@ -694,7 +686,7 @@ bool PositionChange1(int target)
   Output1 = Output1 * speedScale;
   analogWrite(motor1PWM, abs(Output1));
 
-  if (abs(position1 - target) <= 5)
+  if (abs(position1 - target) <= 8)
   {
     analogWrite(motor1PWM, 0);
     Output1 = 0;
@@ -702,9 +694,9 @@ bool PositionChange1(int target)
     return true;
   }
 
-  if (Output1 != 0 && abs(Output1) < 19)
+  if (Output1 != 0 && abs(Output1) <= 18)
   { // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
-    Output1 = (Output1 >= 0) ? 15 : -15;
+    Output1 = (Output1 >= 0) ? 19 : -19;
   }
   // PrintStats1();
   return false;
@@ -735,7 +727,7 @@ bool PositionChange2(int target)
   Output2 = Output2 * speedScale;
   analogWrite(motor2PWM, abs(Output2));
 
-  if (abs(position2 - target) <= 0)
+  if (abs(position2 - target) <= 8)
   {
     analogWrite(motor2PWM, 0);
     Output2 = 0;
@@ -743,9 +735,9 @@ bool PositionChange2(int target)
     return true;
   }
 
-  if (Output2 != 0 && abs(Output2) < 19)
+  if (Output2 != 0 && abs(Output2) <= 18)
   { // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
-    Output2 = (Output2 >= 0) ? 15 : -15;
+    Output2 = (Output2 >= 0) ? 19 : -19;
   }
   // PrintStats2();
   return false;
@@ -754,17 +746,17 @@ bool PositionChange2(int target)
 void countChangeA1()
 {
   if (digitalRead(motor1encB) != digitalRead(motor1encA))
-    position1++;
-  else
     position1--;
+  else
+    position1++;
 }
 
 void countChangeB1()
 {
   if (digitalRead(motor1encB) == digitalRead(motor1encA))
-    position1++;
-  else
     position1--;
+  else
+    position1++;
 }
 
 void countChangeA2()
@@ -958,6 +950,11 @@ void CommTask(void *pvParameters)
             latestData.s = ts;
             latestData.h = th;
             latestData.d = td;
+            Serial2.print("Received X: ");
+            Serial2.print(tx);
+            Serial2.print(" Y: ");
+            Serial2.println(ty);
+            // white on edge to receive from screen, green on edge to receive from esp32 
             xSemaphoreGive(dataMutex);
           }
         }
@@ -1007,7 +1004,7 @@ void CommTask(void *pvParameters)
       newData = false; // Reset the flag for the next message
     }*/
 
-    vTaskDelay(1 / portTICK_PERIOD_MS);
+    vTaskDelay(5 / portTICK_PERIOD_MS);
   }
 }
 
