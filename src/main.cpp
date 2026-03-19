@@ -159,6 +159,7 @@ int motor1encA = 18; // solder these onto esp32
 int motor1encB = 17; 
 int motor1enableA = 0; // PCF
 int motor1enableB = 6;
+int motor1CS = 8;
 
 // motor2 - the motor that controls theta2
 int motor2PWM = 37;
@@ -168,6 +169,7 @@ int motor2encA = 15; // solder these onto esp32
 int motor2encB = 16;
 int motor2enableA = 1; // PCF
 int motor2enableB = 6;
+int motor2CS = 5;
 
 // Limit switches
 int limit1 = 38; // this limit is for theta1
@@ -204,7 +206,7 @@ float homePosY = 0.5; // 0
 
 // PID PARAMETERS //
 
-float Kp = 0.15, Ki = 0.0005, Kd = 0.006;
+float Kp = 0.18, Ki = 0.0, Kd = 0.006;
 
 // motor 1
 float Input1, Output1, Setpoint1;
@@ -215,7 +217,7 @@ float Input2, Output2, Setpoint2;
 QuickPID PID2(&Input2, &Output2, &Setpoint2);
 
 // speed scaling factor for PID output, between 0 and 1
-float speedScale = 0.8;
+float speedScale = 1.0;
 // I can also change pointDensity to affect smoothness/speed
 
 // Serial
@@ -322,6 +324,10 @@ void setup()
   // i2c lines
   pinMode(21, INPUT_PULLUP);
   pinMode(22, INPUT_PULLUP);
+
+  // current sense pins
+  pinMode(motor1CS, INPUT_PULLDOWN);
+  pinMode(motor2CS, INPUT_PULLDOWN);
 
   // ATTACHING INTERRUPTS //
   attachInterrupt(digitalPinToInterrupt(motor1encA), countChangeA1, CHANGE);
@@ -466,7 +472,7 @@ void loop()
     // we will be using the batch method, send all data points, then move
     if (!allPointsReceived)
     {
-      vTaskDelay(10 / portTICK_PERIOD_MS);
+      vTaskDelay(5 / portTICK_PERIOD_MS);
     }
     else
     {
@@ -526,6 +532,12 @@ void loop()
     // 4. Update pneumatics live
     zAxis(rx_a);
     suction(rx_s);
+
+    //print cs pins
+    Serial2.print("M1 CS: ");
+    Serial2.print(analogRead(motor1CS));
+    Serial2.print(" M2 CS: ");
+    Serial2.println(analogRead(motor2CS));
 
     // 5. Only exit when the robot has caught up to the target
     while (!arrive1 || !arrive2)
