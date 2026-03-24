@@ -67,51 +67,10 @@ float L1 = 0.3;    //
 float L2 = r4 * 2; // 0.15942
 float theta2_max = 160 * deg2rad;
 
-/* OLD PINOUT ASSIGNMENTS:
-Homing switches (normally LOW): GPIO01, GPIO2
 
-High current switch (vacuum motor on/off): GPIO38
-
-Motor Driver A:
-INA - GPIO4 X
-ENA - GPIO5 X
-PWM - GPIO6 X
-CS - GPIO7
-ENB - GPIO15 X
-INB - GPIO16 X
-
-Motor Driver B:
-INA - GPIO17 X
-ENA - GPIO8 X
-PWM - GPIO3 X
-CS - GPIO9
-ENB - GPIO10 X
-INB - GPIO11 X
-*/
-
-/* NEW PINOUT ASSIGNMENTS:
-Homing switches (normally LOW): GPIO01 now A0, GPIO2 now A1
- 
-High current switch (vacuum motor on/off): GPIO38 now A5
- 
-Motor Driver A:
-INA - GPIO4 now SCK (36)
-ENA - GPIO5 now MOSI (35)
-PWM - GPIO6 now MISO (37)
-CS - GPIO7 now D5
-ENB - GPIO15 now D6
-INB - GPIO16 now D9
- 
-Motor Driver B:
-INA - GPIO17 now D10
-ENA - GPIO8 now D11
-PWM - GPIO3 now d16
-CS - GPIO9 now  d17
-ENB - GPIO10 now d12
-INB - GPIO11 now d13
-*/
 /////////////////////////////////
 /* PINOUT as of 3/9/2026
+each pcf pin is minus 1 (e.g. P1 = 0)
 Homing switches (normally LOW): 
 sw1 - RX (38)
 sw2 - TX (39)
@@ -217,7 +176,8 @@ float Input2, Output2, Setpoint2;
 QuickPID PID2(&Input2, &Output2, &Setpoint2);
 
 // speed scaling factor for PID output, between 0 and 1
-float speedScale = 1.0;
+// this just limits the maximum speed
+float speedScale = 0.8;
 // I can also change pointDensity to affect smoothness/speed
 
 // Serial
@@ -695,7 +655,7 @@ bool PositionChange1(int target)
     return true;
   }
   */
-  Output1 = Output1 * speedScale;
+  Output1 = constrain(Output1,-255*speedScale,255*speedScale);
   analogWrite(motor1PWM, abs(Output1));
 
   if (abs(position1 - target) <= 8)
@@ -736,7 +696,7 @@ bool PositionChange2(int target)
     return true;
   }
   */
-  Output2 = Output2 * speedScale;
+  Output2 = Output2;
   analogWrite(motor2PWM, abs(Output2));
 
   if (abs(position2 - target) <= 8)
@@ -815,7 +775,7 @@ void PrintStats2()
   Serial.print(Setpoint2);
   Serial.print("   ");
   Serial.print("M2Position:  ");
-  Serial.print(position2);
+  Serial.println(position2);
 }
 
 void Stop()
@@ -1058,7 +1018,7 @@ void MoveTo(float startX, float startY, float endX, float endY)
     {
       arrived1 = PositionChange1(Setpoint1);
       arrived2 = PositionChange2(Setpoint2);
-      vTaskDelay(5 / portTICK_PERIOD_MS); // Short delay to prevent CPU hogging
+      vTaskDelay(5 / portTICK_PERIOD_MS); // Short delay to prevent CPU overload
     }
   }
 }
