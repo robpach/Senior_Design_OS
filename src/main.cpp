@@ -26,6 +26,7 @@ struct ControlData
   int x, y, a, s, h, d;
 } latestData;
 void CommTask(void *pvParameters);
+#define TICK_5MS pdMS_TO_TICKS(5)
 
 // VARIABLE DEFINITIONS //
 
@@ -43,8 +44,8 @@ double theta1[maxPoints];
 double THETA2[maxPoints];
 
 // Demo position parameters
-float carriageX = 0.0;
-float carriageY = 0.0;
+float carriageX = 0.5;
+float carriageY = 0.5; // both in meters, these are just test values
 int receivedPoints = 0;
 
 // Position
@@ -210,7 +211,7 @@ void countChangeB2();
 void receiveEvent(int howMany);
 void linspace(float start, float end, int numPoints, float *array);
 void CommTask(void *pvParameters);
-void MoveTo(float startX, float startY, float endX, float endY);
+void MoveTo(float endX, float endY);
 
 void setup()
 {
@@ -326,6 +327,17 @@ void setup()
 void loop()
 {
 
+  // testing the demo loop
+  receivedPoints = 5;
+  allPointsReceived = true;
+  for (int i = 0; i < 5; i++)
+  {
+    camX[i] = 0.1*i;
+    camY[i] = 0.5;
+  }
+
+
+
   /* Debugging statements */
   /*while (true) {
     MotorDirection(2, HIGH);
@@ -375,6 +387,8 @@ void loop()
     Serial.println(dirAState);
     delay(1000);
   }*/
+
+  
   
 
   switch (currentState)
@@ -434,36 +448,33 @@ void loop()
     {
       vTaskDelay(5 / portTICK_PERIOD_MS);
     }
-    else
+    else if (allPointsReceived)
     {
+      const TickType_t actuationDelay = pdMS_TO_TICKS(30);
       for (int i = 0; i < receivedPoints; i++)
       {
-
         // move from current position to chip position and pick up
-        MoveTo(currentPosX, currentPosY, camX[i], camY[i]);
-        currentPosX = camX[i];
-        currentPosY = camY[i];
-        delay(50);
+        MoveTo(camX[i], camY[i]);
+        vTaskDelay(actuationDelay);
         zAxis(1);
-        delay(50);
+        vTaskDelay(actuationDelay);
         suction(1);
-        delay(50);
+        vTaskDelay(actuationDelay);
         zAxis(0);
 
         // move to carriage and drop off
-        MoveTo(currentPosX, currentPosY, carriageX, carriageY);
-        currentPosX = carriageX;
-        currentPosY = carriageY;
-        delay(50);
+        MoveTo(carriageX, carriageY);
+        vTaskDelay(actuationDelay);
         zAxis(1);
-        delay(50);
+        vTaskDelay(actuationDelay);
         suction(0);
-        delay(50);
+        vTaskDelay(actuationDelay);
         zAxis(0);
       }
       receivedPoints = 0;
       allPointsReceived = false;
-      currentState = Waiting;
+      //currentState = Waiting; uncomment after done with testing
+      while (true);
     }
     break;
 
@@ -485,32 +496,32 @@ void loop()
     Setpoint1 = constrain(radToPos(theta1[1]), minPos1, maxPos1);
     Setpoint2 = constrain(radToPos(THETA2[1]), minPos2, maxPos2);
 
-    // 3. Drive motors (NON-BLOCKING)
+    // 3. Drive motors
     bool arrive1 = PositionChange1(Setpoint1);
     bool arrive2 = PositionChange2(Setpoint2);
+    vTaskDelay(pdMS_TO_TICKS(5));
 
     // 4. Update pneumatics live
     zAxis(rx_a);
     suction(rx_s);
 
-    //print cs pins
-    Serial2.print("M1 CS: ");
-    Serial2.print(analogRead(motor1CS));
-    Serial2.print(" M2 CS: ");
-    Serial2.println(analogRead(motor2CS));
-
     // 5. Only exit when the robot has caught up to the target
-    while (!arrive1 || !arrive2)
+    /*while (!arrive1 || !arrive2)
     {
       arrive1 = PositionChange1(Setpoint1);
       arrive2 = PositionChange2(Setpoint2);
       zAxis(rx_a);
       suction(rx_s);
       vTaskDelay(5 / portTICK_PERIOD_MS);
+    }*/
+
+    if (arrive1 && arrive2) 
+    {
+        currentState = Waiting; 
     }
 
+    // printing deugging every 200 ms
     static uint32_t lastPrintTime = 0;
-
     if (millis() - lastPrintTime > 200)
     { // Only print 10 times per second
       Serial2.print("T1: ");
@@ -521,6 +532,10 @@ void loop()
       Serial2.print(currentPosX);
       Serial2.print(" Y: ");
       Serial2.println(currentPosY);
+      Serial2.print("M1 CS: ");
+      Serial2.print(analogRead(motor1CS));
+      Serial2.print(" M2 CS: ");
+      Serial2.println(analogRead(motor2CS));
       lastPrintTime = millis();
     }
     break;
@@ -1000,8 +1015,8 @@ void linspace(float start, float end, int numPoints, float *output)
   }
 }
 
-// Linear interpolates from start to end and moves the end effector
-void MoveTo(float startX, float startY, float endX, float endY)
+// old MoveTo
+/*void MoveTo(float startX, float startY, float endX, float endY)
 {
   dist = sqrt(pow((endX - startX), 2) + pow((endY - startY), 2));
   pointCount = int(dist * pointDensity);
@@ -1014,11 +1029,66 @@ void MoveTo(float startX, float startY, float endX, float endY)
     Setpoint2 = constrain(radToPos(THETA2[i]), minPos2, maxPos2);
     bool arrived1 = PositionChange1(Setpoint1);
     bool arrived2 = PositionChange2(Setpoint2);
+    int timeout = 0;
     while (!arrived1 || !arrived2)
     {
       arrived1 = PositionChange1(Setpoint1);
       arrived2 = PositionChange2(Setpoint2);
       vTaskDelay(5 / portTICK_PERIOD_MS); // Short delay to prevent CPU overload
+      timeout++;
+      if (timeout > 200) break;
     }
+    currentPosX = xPoints[i];
+    currentPosY = yPoints[i];
   }
+}*/
+
+
+// Linear interpolates from start to end and moves the end effector
+void MoveTo(float endX, float endY)
+{
+  dist = sqrt(pow((endX - currentPosX), 2) + pow((endY - currentPosY), 2));
+  pointCount = int(dist * pointDensity);
+
+  // edge case where distance is small
+  if (pointCount < 1) {
+    currentPosX = endX;
+    currentPosY = endY;
+    return; 
+  }
+
+  linspace(currentPosX, endX, pointCount, xPoints);
+  linspace(currentPosY, endY, pointCount, yPoints);
+
+  for (int i = 0; i < pointCount; i++)
+  {
+    inverseCalc(xPoints[i], yPoints[i], i);
+    Setpoint1 = constrain(radToPos(theta1[i]), minPos1, maxPos1);
+    Setpoint2 = constrain(radToPos(THETA2[i]), minPos2, maxPos2);
+    bool arrived1 = PositionChange1(Setpoint1);
+    bool arrived2 = PositionChange2(Setpoint2);
+    /* use this loop instead of plain positionchange for more accuracy
+    int timeout = 0; 
+    while (!arrived1 || !arrived2)
+    {
+      arrived1 = PositionChange1(Setpoint1);
+      arrived2 = PositionChange2(Setpoint2);
+      vTaskDelay(TICK_5MS);
+      timeout++;
+      if (timeout > 500) break;
+    }*/
+    PositionChange1(Setpoint1);
+    PositionChange2(Setpoint2);
+    
+    // intentional delay between points
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    currentPosX = xPoints[i];
+    currentPosY = yPoints[i];
+  }
+
+  while (!PositionChange1(Setpoint1) || !PositionChange2(Setpoint2)) {
+    vTaskDelay(TICK_5MS);
+  }
+
 }
