@@ -56,7 +56,7 @@ int last_rx_y = 0;
 int last_rx_a = 0;
 int last_rx_s = 0;
 
-// link lengths all in mm
+// link lengths all in m
 // the commented values are the link lengths of nicky's model
 // CALIBRATE R1 ONCE ASSEMBLED
 const float r1 = 0.04717; // 0.;
@@ -159,6 +159,8 @@ const int maxPos1 = (180.0 / 360.0) * (float)totalCounts;
 // motor 2
 const int minPos2 = 0; // (10.0 / 360.0) * (float)totalCounts;
 const int maxPos2 = (180.0 / 360.0) * (float)totalCounts;
+unsigned long stabilityTimer = 0; 
+const int stabilityDelay = 150;
 
 // Home Positions - CHANGE THESE TO ACTUAL X AND Y AFTER HOMING
 float homePosX = 0.0; // add the link lengths together
@@ -166,7 +168,7 @@ float homePosY = 0.5; // 0
 
 // PID PARAMETERS //
 
-float Kp = 0.18, Ki = 0.0, Kd = 0.006;
+float Kp = 0.18, Ki = 0.01, Kd = 0.01; // Kp = 0.18, Kd = 0.006
 
 // motor 1
 float Input1, Output1, Setpoint1;
@@ -176,9 +178,10 @@ QuickPID PID1(&Input1, &Output1, &Setpoint1);
 float Input2, Output2, Setpoint2;
 QuickPID PID2(&Input2, &Output2, &Setpoint2);
 
+
 // speed scaling factor for PID output, between 0 and 1
 // this just limits the maximum speed
-float speedScale = 0.8;
+float speedScale = 0.2;
 // I can also change pointDensity to affect smoothness/speed
 
 // Serial
@@ -316,18 +319,22 @@ void setup()
   PID1.SetMode(PID1.Control::automatic);
   PID1.SetAntiWindupMode(PID1.iAwMode::iAwCondition);
   PID1.SetOutputLimits(-255, 255);
+  PID1.SetSampleTimeUs(0);
   // motor2
   Input2 = position2;
   PID2.SetTunings(Kp, Ki, Kd);
   PID2.SetMode(PID2.Control::automatic);
   PID2.SetAntiWindupMode(PID2.iAwMode::iAwCondition);
   PID2.SetOutputLimits(-255, 255);
+  PID2.SetSampleTimeUs(0);
 }
 
 void loop()
 {
 
-  // testing the demo loop
+  // DEMO LOOP TESTING CODE
+  // this allows us to bypass receiving serial array from the pi
+  /*
   receivedPoints = 5;
   allPointsReceived = true;
   for (int i = 0; i < 5; i++)
@@ -335,61 +342,55 @@ void loop()
     camX[i] = 0.1*i;
     camY[i] = 0.5;
   }
-
-
-
-  /* Debugging statements */
-  /*while (true) {
-    MotorDirection(2, HIGH);
-    analogWrite(motor2PWM, 30);
-    Serial2.println(position2);
-    delay(100);
-  }*/
-
-  /*while (true) {
-    MotorDirection(1, HIGH);
-    analogWrite(motor1PWM, 30);
-    Serial2.println(position1);
-    delay(100);
-  }*/
-
-  /*while (true) {
-    Serial.println("switched to LOW");
-    pcf.digitalWrite(motor1dirA, LOW);
-    bool dirAState = pcf.digitalRead(motor1dirA);
-    Serial.print("DirA: ");
-    Serial.println(dirAState);
-    digitalWrite(LED_BUILTIN, dirAState);
-    delay(1000);
-    Serial.println("switched to HIGH");
-    pcf.digitalWrite(motor1dirA, HIGH);
-    dirAState = pcf.digitalRead(motor1dirA);
-    Serial.print("DirA: ");
-    Serial.println(dirAState);
-    digitalWrite(LED_BUILTIN, dirAState);
-    delay(1000);
-  }*/
-
-  /*while (true) {
-    bool dirAState = pcf.digitalRead(motor1dirA);
-    Serial.println("switched to HIGH");
-    MotorDirection(1,HIGH);
-    delay(10);
-    Serial.print("DirA: ");
-    dirAState = pcf.digitalRead(motor1dirA);
-    Serial.println(dirAState);
-    delay(1000);
-    Serial.println("switched to LOW");
-    MotorDirection(1,LOW);
-    delay(10);
-    Serial.print("DirA: ");
-    dirAState = pcf.digitalRead(motor1dirA);
-    Serial.println(dirAState);
-    delay(1000);
-  }*/
-
+  */
   
+  /* THETA 2 TESTING CODE */
+  // hit theta2 limit then go to 3 different PId controlled points
+  bool limitHit = digitalRead(limit2);
+  MotorDirection(2,LOW);
+  analogWrite(motor2PWM, 80);
+  while (!limitHit) {
+    limitHit = digitalRead(limit2);
+  }
+  analogWrite(motor2PWM, 0);
+  position2 = 0;
+  pcf.digitalWrite(vacuum, HIGH);
+
+  while(!PositionChange2(1000))
+  {
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+
+  delay(500);
+
+  while (!PositionChange2(2000))
+  {
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+
+  delay(500);
+
+  while(!PositionChange2(3000))
+  {
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+
+  while (true);
+
+
+  /* THETA 1 TESTING CODE 
+  position1 = 0;  
+
+  while (true) {
+    suction(1);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    suction(0);
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
   
+  while (true);
+  */
+
 
   switch (currentState)
   {
@@ -442,15 +443,28 @@ void loop()
 
   case Demo:
 
+    // We need to tell the robot to move out of the way of the mechanism so that the camera can take a good pic
+    // THEN, the esp32 should send a signal through Serial2 giving the camera a green light  
+    // At this point, the mechanism should be homed
+    
+    float pictureAngle = PI;
+    int pictureCount = radToPos(pictureAngle);
+
+    while(!PositionChange1(pictureCount))
+    {
+      vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    Serial2.println("picture");
+
     // create some sort of statement that guarantees all data is sent, aka camX[receivedPoints] = 0
-    // we will be using the batch method, send all data points, then move
     if (!allPointsReceived)
     {
       vTaskDelay(5 / portTICK_PERIOD_MS);
     }
     else if (allPointsReceived)
     {
-      const TickType_t actuationDelay = pdMS_TO_TICKS(30);
+      const TickType_t actuationDelay = pdMS_TO_TICKS(500);
       for (int i = 0; i < receivedPoints; i++)
       {
         // move from current position to chip position and pick up
@@ -506,19 +520,16 @@ void loop()
     suction(rx_s);
 
     // 5. Only exit when the robot has caught up to the target
-    /*while (!arrive1 || !arrive2)
-    {
-      arrive1 = PositionChange1(Setpoint1);
-      arrive2 = PositionChange2(Setpoint2);
-      zAxis(rx_a);
-      suction(rx_s);
-      vTaskDelay(5 / portTICK_PERIOD_MS);
-    }*/
 
-    if (arrive1 && arrive2) 
+    if (arrive2) 
     {
         currentState = Waiting; 
     }
+
+    /*if (arrive1 && arrive2) 
+    {
+        currentState = Waiting; 
+    }*/
 
     // printing deugging every 200 ms
     static uint32_t lastPrintTime = 0;
@@ -553,7 +564,7 @@ void MotorDirection(int motor, int direction)
       pcf.digitalWrite(motor1dirA, HIGH);
       digitalWrite(motor1dirB, LOW);
     }
-    else
+    else if (direction == LOW)
     {
       pcf.digitalWrite(motor1dirA, LOW);
       digitalWrite(motor1dirB, HIGH);
@@ -566,9 +577,14 @@ void MotorDirection(int motor, int direction)
       pcf.digitalWrite(motor2dirA, HIGH);
       digitalWrite(motor2dirB, LOW);
     }
-    else
+    else if (direction == LOW)
     {
       pcf.digitalWrite(motor2dirA, LOW);
+      digitalWrite(motor2dirB, HIGH);
+    } 
+    else if (direction == 3) 
+    {
+      pcf.digitalWrite(motor2dirA, HIGH);
       digitalWrite(motor2dirB, HIGH);
     }
   }
@@ -597,9 +613,9 @@ void HomeMotors()
   analogWrite(motor2PWM, 0);
   position2 = 0;*/
 
-  Serial.println("Homing Disabled, re-enable for proper function");
+  Serial2.println("Homing Disabled, re-enable for proper function");
   position1 = 0;
-  position2 = 0;
+  position2 = 4800;
 
   rx_h = 0;
 }
@@ -645,6 +661,99 @@ void updatePosition(int x, int y)
 
 bool PositionChange1(int target)
 {
+  Setpoint1 = target;
+  Input1 = position1;
+  PID1.Compute();
+
+  // 1. ARRIVAL CHECK FIRST
+  if (abs(position1 - target) <= 10) // Window widened for arm weight
+  {
+    analogWrite(motor1PWM, 0);
+    MotorDirection(1, 3); // BRAKE
+    Output1 = 0;          // Clear the variable for the next state
+    return true;          // EXIT NOW
+  }
+
+  // 2. DEADZONE (Only if we didn't arrive)
+  if (Output1 != 0 && abs(Output1) <= 18)
+  {
+    Output1 = (Output1 >= 0) ? 19 : -19;
+  }
+
+  // 3. CONSTRAIN & WRITE
+  Output1 = constrain(Output1, -255 * speedScale, 255 * speedScale);
+  MotorDirection(1, Output1 >= 0 ? HIGH : LOW);
+  analogWrite(motor1PWM, (int)abs(Output1));
+  
+  return false;
+}
+/* generated positionchange
+bool PositionChange2(int target)
+{
+  Setpoint2 = target;
+  Input2 = position2;
+  PID2.Compute();   
+
+  int error = abs(position2 - target);
+
+  if (error <= 8) // Target Window
+  {
+    // DO NOT kill power yet! Let the PID (and Kd) settle the motor.
+    
+    if (stabilityTimer == 0) stabilityTimer = millis();
+
+    if (millis() - stabilityTimer >= 150) {
+      analogWrite(motor2PWM, 0); // ONLY kill power after 150ms of stillness
+      MotorDirection(2, 3);
+      return true; 
+    }
+  } 
+  else 
+  {
+    stabilityTimer = 0;
+  }
+
+  // Keep the motor alive so Kd can dampen the movement
+  Output2 = constrain(Output2, -255 * speedScale, 255 * speedScale);
+  MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
+  analogWrite(motor2PWM, abs(Output2));
+
+  return false;
+} */
+
+bool PositionChange2(int target)
+{
+  Setpoint2 = target;
+  Input2 = position2;
+  PID2.Compute();
+
+  // 1. ARRIVAL CHECK FIRST
+  if (abs(position2 - target) <= 10) // Window widened for arm weight
+  {
+    analogWrite(motor2PWM, 0);
+    MotorDirection(2, 3); // BRAKE
+    Output2 = 0;          // Clear the variable for the next state
+    return true;          // EXIT NOW
+  }
+
+  // 2. DEADZONE (Only if we didn't arrive)
+  if (Output2 != 0 && abs(Output2) <= 18)
+  {
+    Output2 = (Output2 >= 0) ? 19 : -19;
+  }
+
+  // 3. CONSTRAIN & WRITE
+  Output2 = constrain(Output2, -255 * speedScale, 255 * speedScale);
+  MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
+  analogWrite(motor2PWM, (int)abs(Output2));
+  
+  return false;
+}
+
+
+/* rate limiter version
+bool PositionChange2(int target)
+{
   // add a condition to check the value of current sense pin
   // do some testing to check the normal level of current, then find the stall current
   // stall current should be 5.5 A, and the CS pin does 140mV per amp
@@ -652,83 +761,42 @@ bool PositionChange1(int target)
   // 0.7/3.3 * 4095 = 869, this is the Analog inut threshold. 
   // if either motor reads above 869 on CS pin, call Stop();
 
-  Setpoint1 = target;
-  Input1 = position1;
-  PID1.Compute();
-  MotorDirection(1, Output1 >= 0 ? HIGH : LOW);
-
-  /* stops the motor based on the bounds
-  if (position1 < minPos1) {
-    Serial.println("Motor 1 Minimum Position Exceeded");
-    Output1 = 0;
-    analogWrite(motor1PWM, 0);
-    return true;
-  } else if (position1 > maxPos1) {
-    Serial.println("Motor 1 Maximum Position Exceeded");
-    Output1 = 0;
-    analogWrite(motor1PWM, 0);
-    return true;
-  }
-  */
-  Output1 = constrain(Output1,-255*speedScale,255*speedScale);
-  analogWrite(motor1PWM, abs(Output1));
-
-  if (abs(position1 - target) <= 8)
-  {
-    analogWrite(motor1PWM, 0);
-    Output1 = 0;
-    // PrintStats1();
-    return true;
-  }
-
-  if (Output1 != 0 && abs(Output1) <= 18)
-  { // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
-    Output1 = (Output1 >= 0) ? 19 : -19;
-  }
-  // PrintStats1();
-  return false;
-}
-
-bool PositionChange2(int target)
-{
-  // add a condition to check the value of current sense pin
+  static float lastOutput2 = 0;
 
   Setpoint2 = target;
   Input2 = position2;
   PID2.Compute();
-  MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
-
-  /* stops motor based on the bounds
-  if (position2 < minPos2) {
-    Serial.println("Motor 2 Minimum Position Exceeded");
-    Output2 = 0;
-    analogWrite(motor2PWM, 0);
-    return true;
-  } else if (position2 > maxPos2) {
-    Serial.println("Motor 2 Maximum Position Exceeded");
-    Output2 = 0;
-    analogWrite(motor2PWM, 0);
-    return true;
-  }
-  */
-  Output2 = Output2;
-  analogWrite(motor2PWM, abs(Output2));
-
-  if (abs(position2 - target) <= 8)
+ 
+  if (abs(position2 - target) <= 10) // Increased to 10 for the arm weight
   {
     analogWrite(motor2PWM, 0);
+    MotorDirection(2, 3); // Active Brake
     Output2 = 0;
-    // PrintStats2();
+    lastOutput2 = 0; 
     return true;
   }
 
+  // Deadzone
   if (Output2 != 0 && abs(Output2) <= 18)
   { // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
     Output2 = (Output2 >= 0) ? 19 : -19;
   }
+
+  // Rate limiter
+  float maxStep = 10; // tune this
+  float delta = Output2 - lastOutput2;
+  delta = constrain(delta, -maxStep, maxStep);
+  Output2 = lastOutput2 + delta;
+  lastOutput2 = Output2;
+
+  Output2 = constrain(Output2,-255*speedScale,255*speedScale);
+  MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
+  analogWrite(motor2PWM, (int)abs(Output2));
+
   // PrintStats2();
   return false;
 }
+*/
 
 void countChangeA1()
 {
@@ -898,6 +966,9 @@ void inverseCalc(float Px, float Py, int i)
     THETA2[i] = 2.0 * atan(u3);
   }
 
+  // Differential drive compensation
+  THETA2[i] += theta1[i];
+
   /*
   if (THETA2[i] < 0) {
     THETA2[i] += 2 * PI;
@@ -937,10 +1008,25 @@ void CommTask(void *pvParameters)
             latestData.s = ts;
             latestData.h = th;
             latestData.d = td;
-            Serial2.print("Received X: ");
-            Serial2.print(tx);
-            Serial2.print(" Y: ");
-            Serial2.println(ty);
+
+            static uint32_t lastTime = millis();
+            if (millis() - lastTime > 200) // Print every 200 ms
+            {
+              Serial2.print("Received X: ");
+              Serial2.print(tx);
+              Serial2.print(" Y: ");
+              Serial2.print(ty);
+              Serial2.print(" A: ");
+              Serial2.print(ta);
+              Serial2.print(" S: ");
+              Serial2.print(ts);
+              Serial2.print(" H: ");
+              Serial2.print(th);
+              Serial2.print(" D: ");
+              Serial2.println(td);
+              lastTime = millis();
+            }
+            
             // white on edge to receive from screen, green on edge to receive from esp32 
             xSemaphoreGive(dataMutex);
           }
@@ -1081,7 +1167,7 @@ void MoveTo(float endX, float endY)
     PositionChange2(Setpoint2);
     
     // intentional delay between points
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     currentPosX = xPoints[i];
     currentPosY = yPoints[i];
@@ -1091,4 +1177,8 @@ void MoveTo(float endX, float endY)
     vTaskDelay(TICK_5MS);
   }
 
+}
+
+void ForwardKin(float theta1, float theta2){
+  
 }
