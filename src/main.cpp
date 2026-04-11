@@ -14,7 +14,27 @@ There is option for a homing sequence, demo sequence, and manual control
 #include <Adafruit_PCF8574.h> // might be 5 instead fo 4 at the end
 
 // I2C Address for raspberry pi
-#define I2C_ADDR 0x08 // might change
+//#define I2C_ADDR 0x08 // might change
+
+// Function prototypes
+void MotorDirection(int motor, int direction);
+void HomeMotors();
+void zAxis(int toggleA);
+void suction(int toggleS);
+void updatePosition(int x, int y);
+void inverseCalc(float x, float y, int pointNum);
+bool PositionChange1(int target);
+bool PositionChange2(int target);
+int radToPos(float radians);
+void countChangeA1();
+void countChangeB1();
+void countChangeA2();
+void countChangeB2();
+void receiveEvent(int howMany);
+void linspace(float start, float end, int numPoints, float *array);
+void CommTask(void *pvParameters);
+void MoveTo(float endX, float endY);
+void ForwardCalc(float theta1, float THETA2);
 
 // Intitialize the GPIO expansion
 Adafruit_PCF8574 pcf;
@@ -33,6 +53,9 @@ void CommTask(void *pvParameters);
 const float deg2rad = PI / 180;
 const float rad2deg = 180 / PI;
 
+// Forward Kinematic temp variables
+float Xcalc, Ycalc;
+
 // Kinematic arrays
 const int maxPoints = 1000;
 float pointDensity = 50.0;
@@ -47,6 +70,8 @@ double THETA2[maxPoints];
 float carriageX = 0.5;
 float carriageY = 0.5; // both in meters, these are just test values
 int receivedPoints = 0;
+float pictureAngle = PI;
+int pictureCount = radToPos(pictureAngle);
 
 // Position
 volatile float currentPosX = 0.0;
@@ -197,24 +222,6 @@ enum MachineStates
 
 MachineStates currentState = Waiting;
 
-// Function prototypes
-void MotorDirection(int motor, int direction);
-void HomeMotors();
-void zAxis(int toggleA);
-void suction(int toggleS);
-void updatePosition(int x, int y);
-void inverseCalc(float x, float y, int pointNum);
-bool PositionChange1(int target);
-bool PositionChange2(int target);
-int radToPos(float radians);
-void countChangeA1();
-void countChangeB1();
-void countChangeA2();
-void countChangeB2();
-void receiveEvent(int howMany);
-void linspace(float start, float end, int numPoints, float *array);
-void CommTask(void *pvParameters);
-void MoveTo(float endX, float endY);
 
 void setup()
 {
@@ -332,6 +339,17 @@ void setup()
 void loop()
 {
 
+  /*
+  MotorDirection(1, HIGH);
+  MotorDirection(2, HIGH);
+  analogWrite(motor1PWM, 80);
+  analogWrite(motor2PWM, 80);
+  vTaskDelay(pdMS_TO_TICKS(500));
+  analogWrite(motor1PWM, 0);
+  analogWrite(motor2PWM, 0);
+  while (true);
+  */
+
   // DEMO LOOP TESTING CODE
   // this allows us to bypass receiving serial array from the pi
   /*
@@ -342,10 +360,11 @@ void loop()
     camX[i] = 0.1*i;
     camY[i] = 0.5;
   }
-  */
-  
-  /* THETA 2 TESTING CODE */
-  // hit theta2 limit then go to 3 different PId controlled points
+  */ 
+
+  // theta 2 testing code
+  // hit theta2 limit then go to 3 different PID controlled points
+  /*
   bool limitHit = digitalRead(limit2);
   MotorDirection(2,LOW);
   analogWrite(motor2PWM, 80);
@@ -356,27 +375,29 @@ void loop()
   position2 = 0;
   pcf.digitalWrite(vacuum, HIGH);
 
-  while(!PositionChange2(1000))
-  {
-    vTaskDelay(pdMS_TO_TICKS(5));
-  }
-
-  delay(500);
-
   while (!PositionChange2(2000))
   {
     vTaskDelay(pdMS_TO_TICKS(5));
   }
 
-  delay(500);
+  while (true);
+  
+  vTaskDelay(pdMS_TO_TICKS(1000));
 
-  while(!PositionChange2(3000))
+  PositionChange1(1000);
+  PositionChange2(3000);
+
+  // try getting rid of integral gain because dithering happens on this call of positionchange2
+  while(!PositionChange1(1000) | !PositionChange2(3000))
   {
-    vTaskDelay(pdMS_TO_TICKS(5));
+    PositionChange1(1000);
+    PositionChange2(3000);
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 
   while (true);
 
+  */
 
   /* THETA 1 TESTING CODE 
   position1 = 0;  
@@ -446,9 +467,6 @@ void loop()
     // We need to tell the robot to move out of the way of the mechanism so that the camera can take a good pic
     // THEN, the esp32 should send a signal through Serial2 giving the camera a green light  
     // At this point, the mechanism should be homed
-    
-    float pictureAngle = PI;
-    int pictureCount = radToPos(pictureAngle);
 
     while(!PositionChange1(pictureCount))
     {
@@ -521,15 +539,11 @@ void loop()
 
     // 5. Only exit when the robot has caught up to the target
 
-    if (arrive2) 
+    if (arrive1 && arrive2) 
     {
         currentState = Waiting; 
     }
 
-    /*if (arrive1 && arrive2) 
-    {
-        currentState = Waiting; 
-    }*/
 
     // printing deugging every 200 ms
     static uint32_t lastPrintTime = 0;
@@ -592,30 +606,52 @@ void MotorDirection(int motor, int direction)
 
 void HomeMotors()
 {
-
-  /*Serial2.println("Homing... ");
+  MotorDirection(1, LOW);  // CW
+  MotorDirection(2, LOW);  // CW
 
   suction(LOW);
   zAxis(LOW);
 
-  MotorDirection(1, LOW);  // CW
-  MotorDirection(2, LOW);  // CW
+  // fully extend theta2, not homed just yet
+  bool limitHit2 = digitalRead(limit2);
+  MotorDirection(2, LOW);
+  analogWrite(motor2PWM, 80);
+  while (!limitHit2) {
+    limitHit2 = digitalRead(limit2);
+  }
+  analogWrite(motor2PWM, 0);
 
+  // home theta1 while giving some signal to theta2 so it doesn't crash
+  analogWrite(motor2PWM, 30);
+  bool limitHit1 = digitalRead(limit1);
+  MotorDirection(1, LOW);
+  analogWrite(motor1PWM, 50);
+  while (!limitHit1) {
+    limitHit1 = digitalRead(limit1);
+  }
+  analogWrite(motor1PWM, 0);
+  analogWrite(motor2PWM, 0);
+  position1 = (int)(-(float)totalCounts * (23.0/360.0));
+  
+  // home theta 2
+  limitHit2 = digitalRead(limit2);
+  MotorDirection(2, LOW);
+  analogWrite(motor2PWM, 80);
+  while (!limitHit2) {
+    limitHit2 = digitalRead(limit2);
+  }
+  analogWrite(motor2PWM, 0);
+  position2 = (totalCounts/2) - (totalCounts * (7/360));
+
+  /* theta 1 homing sequence
   while (!digitalRead(limit1)) {
     analogWrite(motor1PWM, 80);
   }
   analogWrite(motor1PWM, 0);
   position1 = 0;
+  */
 
-  while (!digitalRead(limit2)) {
-    analogWrite(motor2PWM, 80);
-  }
-  analogWrite(motor2PWM, 0);
-  position2 = 0;*/
-
-  Serial2.println("Homing Disabled, re-enable for proper function");
-  position1 = 0;
-  position2 = 4800;
+  Serial2.println("Homing Partially Disabled, re-enable for proper function");
 
   rx_h = 0;
 }
@@ -669,9 +705,9 @@ bool PositionChange1(int target)
   if (abs(position1 - target) <= 10) // Window widened for arm weight
   {
     analogWrite(motor1PWM, 0);
-    MotorDirection(1, 3); // BRAKE
-    Output1 = 0;          // Clear the variable for the next state
-    return true;          // EXIT NOW
+    MotorDirection(1, 3); // brake
+    Output1 = 0;       
+    return true;         
   }
 
   // 2. DEADZONE (Only if we didn't arrive)
@@ -731,9 +767,9 @@ bool PositionChange2(int target)
   if (abs(position2 - target) <= 10) // Window widened for arm weight
   {
     analogWrite(motor2PWM, 0);
-    MotorDirection(2, 3); // BRAKE
-    Output2 = 0;          // Clear the variable for the next state
-    return true;          // EXIT NOW
+    MotorDirection(2, 3); // brake
+    Output2 = 0;          
+    return true;         
   }
 
   // 2. DEADZONE (Only if we didn't arrive)
@@ -918,7 +954,7 @@ void inverseCalc(float Px, float Py, int i)
     d = -(L1 + r1) * cos(theta2_0) - L2 + sqrt(sq(R) - sq(sin(theta2_0)) * sq(L1 + r1));
   }
 
-  // Solve for Theta2 according to d
+  // Solve for theta2 according to d
   float acos_calc = (sq(R) - sq(L1 + r1) - sq(L2 + d)) / (2 * (L2 + d) * (L1 + r1));
   float acos_value = constrain(acos_calc, -1.0, 1.0);
   float theta2 = acos(acos_value);
@@ -974,6 +1010,45 @@ void inverseCalc(float Px, float Py, int i)
     THETA2[i] += 2 * PI;
   }
   */
+}
+
+// input radians
+void ForwardCalc(float th1, float TH2) {
+  // input of theta1 and THETA2 are in radians!
+  // We will use constants r1, r2, r3, r4, theta2_0, L1, L2 as known
+
+  // Intitialize all local variables
+  float A_1, B_1, C_1, K, A, B, C, u, theta2, discriminant, d;
+
+  // solve for variable length d
+  A_1 = 1;
+  B_1 = 2*(r1*cos(theta2_0) - r2*cos(TH2 - theta2_0) + r4);
+  K = sq(r1) + sq(r2) - sq(r3) + sq(r4);
+  C_1 = K - 2*(r1*r2*cos(TH2) - r1*r4*cos(theta2_0) + r2*r4*cos(TH2 - theta2_0));
+
+  discriminant = sq(B_1) - 4*A_1*C_1;
+  d = (-B_1 + sqrt(discriminant)) / (2*A_1);
+
+  if (d < 0) {
+    d = 0;
+  }
+
+  // solve for theta2 (lowercase)
+  A = 2*r4*(r1-r2*cos(TH2));
+  B = -2*r2*r4*sin(TH2);
+  C = sq(r3) - sq(r2) - sq(r1) - sq(r4) + 2*r1*r2*cos(TH2);
+  u = (B + sqrt(sq(A) + sq(B) - sq(C))) / (C + A);
+
+  theta2 = 2*atan(u);
+
+  if (d > 0) {
+    theta2 = 0;
+  }
+
+  // calculate the points using theta1 and theta2
+  Xcalc = (L1 + r1)*cos(th1) + (L2 + d)*cos(th1+theta2);
+  Ycalc = (L1 + r1)*sin(th1) + (L2 + d)*sin(th1+theta2);
+
 }
 
 // Background task to handle serial communication and i2c data
@@ -1177,8 +1252,4 @@ void MoveTo(float endX, float endY)
     vTaskDelay(TICK_5MS);
   }
 
-}
-
-void ForwardKin(float theta1, float theta2){
-  
 }
