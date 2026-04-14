@@ -631,7 +631,7 @@ void HomeMotors()
   }
   analogWrite(motor1PWM, 0);
   analogWrite(motor2PWM, 0);
-  position1 = (int)(-(float)totalCounts * (23.0/360.0));
+  position1 = (int)(-(float)totalCounts * (23.0/360.0)); // 23 degrees below parallel with x axis
   
   // home theta 2
   limitHit2 = digitalRead(limit2);
@@ -641,7 +641,14 @@ void HomeMotors()
     limitHit2 = digitalRead(limit2);
   }
   analogWrite(motor2PWM, 0);
-  position2 = (totalCounts/2) - (totalCounts * (7/360));
+  position2 = (int)((float)totalCounts * (7.0/360.0)); // 7 degrees from parallel with theta1
+
+  float start_theta1 = ((float)position1 / (float)totalCounts) * 2 * PI;
+  float start_theta2 = ((float)position2 / (float)totalCounts) * 2 * PI;
+
+  ForwardCalc(start_theta1, start_theta2);
+  homePosX = Xcalc;
+  homePosY = Ycalc;
 
   /* theta 1 homing sequence
   while (!digitalRead(limit1)) {
@@ -1012,7 +1019,7 @@ void inverseCalc(float Px, float Py, int i)
   */
 }
 
-// input radians
+// input radians, use theta 1 and THETA2 from encoders
 void ForwardCalc(float th1, float TH2) {
   // input of theta1 and THETA2 are in radians!
   // We will use constants r1, r2, r3, r4, theta2_0, L1, L2 as known
