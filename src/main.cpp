@@ -13,8 +13,6 @@ There is option for a homing sequence, demo sequence, and manual control
 #include <Wire.h>
 #include <Adafruit_PCF8574.h> // might be 5 instead fo 4 at the end
 
-// I2C Address for raspberry pi
-//#define I2C_ADDR 0x08 // might change
 
 // Function prototypes
 void MotorDirection(int motor, int direction);
@@ -35,6 +33,7 @@ void linspace(float start, float end, int numPoints, float *array);
 void CommTask(void *pvParameters);
 void MoveTo(float endX, float endY);
 void ForwardCalc(float theta1, float THETA2);
+void syncCurrentPosition();
 
 // Intitialize the GPIO expansion
 Adafruit_PCF8574 pcf;
@@ -67,8 +66,8 @@ double theta1[maxPoints];
 double THETA2[maxPoints];
 
 // Demo position parameters
-float carriageX = 0.5;
-float carriageY = 0.5; // both in meters, these are just test values
+float carriageX = 0.0;
+float carriageY = 0.3; // both in meters, these are just test values
 int receivedPoints = 0;
 float pictureAngle = PI;
 int pictureCount = radToPos(pictureAngle);
@@ -84,6 +83,8 @@ int last_rx_s = 0;
 // link lengths all in m
 // the commented values are the link lengths of nicky's model
 // CALIBRATE R1 ONCE ASSEMBLED
+/*
+// values given by Nicky, not necessarily wrong, but wanted to try my own
 const float r1 = 0.04717; // 0.;
 const float r2 = 0.16117; // 0.123;
 const float r3 = 0.1651;  // 0.126;
@@ -91,6 +92,15 @@ const float r4 = 0.17296; // 0.129115
 int theta2_0 = 0;
 float L1 = 0.3;    //
 float L2 = r4 * 2; // 0.15942
+float theta2_max = 160 * deg2rad;
+*/
+const float r1 = 0.0355;
+const float r2 = 0.1223;
+const float r3 = 0.1256;  
+const float r4 = 0.1305; 
+int theta2_0 = 0;
+float L1 = 0.185;    
+float L2 = 0.1625; 
 float theta2_max = 160 * deg2rad;
 
 
@@ -179,13 +189,12 @@ const int totalCounts = 9600; // in encoder counts
 
 // Limits in encoder counts for each motor
 // motor 1
-const int minPos1 = 0;
+const int minPos1 = -(int)((float)totalCounts * (23.0 / 360.0)); // 23 degrees below parallel with x axis, negative because of the way we set up the encoders and directions
 const int maxPos1 = (180.0 / 360.0) * (float)totalCounts;
 // motor 2
 const int minPos2 = 0; // (10.0 / 360.0) * (float)totalCounts;
 const int maxPos2 = (180.0 / 360.0) * (float)totalCounts;
-unsigned long stabilityTimer = 0; 
-const int stabilityDelay = 150;
+
 
 // Home Positions - CHANGE THESE TO ACTUAL X AND Y AFTER HOMING
 float homePosX = 0.0; // add the link lengths together
@@ -193,7 +202,7 @@ float homePosY = 0.5; // 0
 
 // PID PARAMETERS //
 
-float Kp = 0.18, Ki = 0.01, Kd = 0.01; // Kp = 0.18, Kd = 0.006
+float Kp = 0.20, Ki = 0.0, Kd = 0.04; // Kp = 0.18, Kd = 0.006
 
 // motor 1
 float Input1, Output1, Setpoint1;
@@ -206,7 +215,7 @@ QuickPID PID2(&Input2, &Output2, &Setpoint2);
 
 // speed scaling factor for PID output, between 0 and 1
 // this just limits the maximum speed
-float speedScale = 0.2;
+float speedScale = 0.8;
 // I can also change pointDensity to affect smoothness/speed
 
 // Serial
@@ -326,14 +335,14 @@ void setup()
   PID1.SetMode(PID1.Control::automatic);
   PID1.SetAntiWindupMode(PID1.iAwMode::iAwCondition);
   PID1.SetOutputLimits(-255, 255);
-  PID1.SetSampleTimeUs(0);
+  PID1.SetSampleTimeUs(5000);
   // motor2
   Input2 = position2;
   PID2.SetTunings(Kp, Ki, Kd);
   PID2.SetMode(PID2.Control::automatic);
   PID2.SetAntiWindupMode(PID2.iAwMode::iAwCondition);
   PID2.SetOutputLimits(-255, 255);
-  PID2.SetSampleTimeUs(0);
+  PID2.SetSampleTimeUs(5000);
 }
 
 void loop()
@@ -352,15 +361,11 @@ void loop()
 
   // DEMO LOOP TESTING CODE
   // this allows us to bypass receiving serial array from the pi
-  /*
-  receivedPoints = 5;
+  
+  receivedPoints = 1;
   allPointsReceived = true;
-  for (int i = 0; i < 5; i++)
-  {
-    camX[i] = 0.1*i;
-    camY[i] = 0.5;
-  }
-  */ 
+  camX[0] = 0.3;
+  camY[0] = 0.3;
 
   // theta 2 testing code
   // hit theta2 limit then go to 3 different PID controlled points
@@ -468,11 +473,13 @@ void loop()
     // THEN, the esp32 should send a signal through Serial2 giving the camera a green light  
     // At this point, the mechanism should be homed
 
+    // reset demo variable
+   /*
     while(!PositionChange1(pictureCount))
     {
       vTaskDelay(pdMS_TO_TICKS(5));
     }
-
+    */
     Serial2.println("picture");
 
     // create some sort of statement that guarantees all data is sent, aka camX[receivedPoints] = 0
@@ -494,6 +501,8 @@ void loop()
         vTaskDelay(actuationDelay);
         zAxis(0);
 
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
         // move to carriage and drop off
         MoveTo(carriageX, carriageY);
         vTaskDelay(actuationDelay);
@@ -502,6 +511,8 @@ void loop()
         suction(0);
         vTaskDelay(actuationDelay);
         zAxis(0);
+
+        vTaskDelay(pdMS_TO_TICKS(3000));
       }
       receivedPoints = 0;
       allPointsReceived = false;
@@ -544,7 +555,7 @@ void loop()
         currentState = Waiting; 
     }
 
-
+    /*
     // printing deugging every 200 ms
     static uint32_t lastPrintTime = 0;
     if (millis() - lastPrintTime > 200)
@@ -563,6 +574,7 @@ void loop()
       Serial2.println(analogRead(motor2CS));
       lastPrintTime = millis();
     }
+    */
     break;
   }
 }
@@ -622,10 +634,10 @@ void HomeMotors()
   analogWrite(motor2PWM, 0);
 
   // home theta1 while giving some signal to theta2 so it doesn't crash
-  analogWrite(motor2PWM, 30);
+  analogWrite(motor2PWM, 50);
   bool limitHit1 = digitalRead(limit1);
   MotorDirection(1, LOW);
-  analogWrite(motor1PWM, 50);
+  analogWrite(motor1PWM, 80);
   while (!limitHit1) {
     limitHit1 = digitalRead(limit1);
   }
@@ -646,21 +658,52 @@ void HomeMotors()
   float start_theta1 = ((float)position1 / (float)totalCounts) * 2 * PI;
   float start_theta2 = ((float)position2 / (float)totalCounts) * 2 * PI;
 
+  // set home position. ForwardCalc redefince Xcalc and Ycalc globals
   ForwardCalc(start_theta1, start_theta2);
   homePosX = Xcalc;
   homePosY = Ycalc;
-
-  /* theta 1 homing sequence
-  while (!digitalRead(limit1)) {
-    analogWrite(motor1PWM, 80);
-  }
-  analogWrite(motor1PWM, 0);
-  position1 = 0;
-  */
-
-  Serial2.println("Homing Partially Disabled, re-enable for proper function");
+  currentPosX = homePosX;
+  currentPosY = homePosY;
 
   rx_h = 0;
+
+  // PID testing
+  /*
+  vTaskDelay(pdMS_TO_TICKS(1000));
+
+  while (!PositionChange2(1000)){
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+
+  vTaskDelay(pdMS_TO_TICKS(1000));
+
+  while(!PositionChange1(2000) | !PositionChange2(5000))
+  {
+    PositionChange1(2000);
+    PositionChange2(5000);
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+
+  vTaskDelay(pdMS_TO_TICKS(1000));
+
+  syncCurrentPosition();
+  MoveTo(0.0, 0.4);
+
+  while (true);
+  */
+}
+
+void syncCurrentPosition() {
+  // 1. Get current joint angles in radians from the volatile encoders
+  float current_th1 = ((float)position1 / (float)totalCounts) * 2.0 * PI;
+  float current_th2 = ((float)position2 / (float)totalCounts) * 2.0 * PI;
+
+  // 2. Run your Forward Kinematics (this updates the globals Xcalc and Ycalc)
+  ForwardCalc(current_th1, current_th2);
+
+  // 3. Update the tracking variables
+  currentPosX = Xcalc;
+  currentPosY = Ycalc;
 }
 
 void zAxis(int toggleA)
@@ -699,7 +742,10 @@ void updatePosition(int x, int y)
   // we need a scale factor here, rx_x and rx_y are just integers
   currentPosX = homePosX + x * 0.01;
   currentPosY = homePosY + y * 0.01;
-  // delay(100);
+  
+  // add a statement controlling the out of bounds error.
+  // if sqrt(pow(currentPosX,2) + pow(currentPosY,2)) > (r1+r2+r3+r4) then out of bounds
+
 }
 
 bool PositionChange1(int target)
@@ -718,9 +764,9 @@ bool PositionChange1(int target)
   }
 
   // 2. DEADZONE (Only if we didn't arrive)
-  if (Output1 != 0 && abs(Output1) <= 18)
+  if (Output1 != 0 && abs(Output1) <= 35)
   {
-    Output1 = (Output1 >= 0) ? 19 : -19;
+    Output1 = (Output1 >= 0) ? 40 : -40;
   }
 
   // 3. CONSTRAIN & WRITE
@@ -730,39 +776,6 @@ bool PositionChange1(int target)
   
   return false;
 }
-/* generated positionchange
-bool PositionChange2(int target)
-{
-  Setpoint2 = target;
-  Input2 = position2;
-  PID2.Compute();   
-
-  int error = abs(position2 - target);
-
-  if (error <= 8) // Target Window
-  {
-    // DO NOT kill power yet! Let the PID (and Kd) settle the motor.
-    
-    if (stabilityTimer == 0) stabilityTimer = millis();
-
-    if (millis() - stabilityTimer >= 150) {
-      analogWrite(motor2PWM, 0); // ONLY kill power after 150ms of stillness
-      MotorDirection(2, 3);
-      return true; 
-    }
-  } 
-  else 
-  {
-    stabilityTimer = 0;
-  }
-
-  // Keep the motor alive so Kd can dampen the movement
-  Output2 = constrain(Output2, -255 * speedScale, 255 * speedScale);
-  MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
-  analogWrite(motor2PWM, abs(Output2));
-
-  return false;
-} */
 
 bool PositionChange2(int target)
 {
@@ -780,9 +793,9 @@ bool PositionChange2(int target)
   }
 
   // 2. DEADZONE (Only if we didn't arrive)
-  if (Output2 != 0 && abs(Output2) <= 18)
+  if (Output2 != 0 && abs(Output2) <= 25)
   {
-    Output2 = (Output2 >= 0) ? 19 : -19;
+    Output2 = (Output2 >= 0) ? 30 : -30;
   }
 
   // 3. CONSTRAIN & WRITE
@@ -792,54 +805,6 @@ bool PositionChange2(int target)
   
   return false;
 }
-
-
-/* rate limiter version
-bool PositionChange2(int target)
-{
-  // add a condition to check the value of current sense pin
-  // do some testing to check the normal level of current, then find the stall current
-  // stall current should be 5.5 A, and the CS pin does 140mV per amp
-  // therefore 0.77 volts should be the stall threshold, but lets say 0.7 volts to be safe
-  // 0.7/3.3 * 4095 = 869, this is the Analog inut threshold. 
-  // if either motor reads above 869 on CS pin, call Stop();
-
-  static float lastOutput2 = 0;
-
-  Setpoint2 = target;
-  Input2 = position2;
-  PID2.Compute();
- 
-  if (abs(position2 - target) <= 10) // Increased to 10 for the arm weight
-  {
-    analogWrite(motor2PWM, 0);
-    MotorDirection(2, 3); // Active Brake
-    Output2 = 0;
-    lastOutput2 = 0; 
-    return true;
-  }
-
-  // Deadzone
-  if (Output2 != 0 && abs(Output2) <= 18)
-  { // THIS DEADZONE WILL NEED TO BE ADJUSTED (after physical mechanism updated)
-    Output2 = (Output2 >= 0) ? 19 : -19;
-  }
-
-  // Rate limiter
-  float maxStep = 10; // tune this
-  float delta = Output2 - lastOutput2;
-  delta = constrain(delta, -maxStep, maxStep);
-  Output2 = lastOutput2 + delta;
-  lastOutput2 = Output2;
-
-  Output2 = constrain(Output2,-255*speedScale,255*speedScale);
-  MotorDirection(2, Output2 >= 0 ? HIGH : LOW);
-  analogWrite(motor2PWM, (int)abs(Output2));
-
-  // PrintStats2();
-  return false;
-}
-*/
 
 void countChangeA1()
 {
@@ -940,16 +905,6 @@ void inverseCalc(float Px, float Py, int i)
   float A3, B3, C3;
   float u2, u3;
   float R = sqrt(sq(Px) + sq(Py));
-
-  /* for reference and calc checks
-  const float r1 = 0.04717;
-  const float r2 = 0.16117;
-  const float r3 = 0.1651;
-  const float r4 = 0.17296;
-  int theta2_0 = 0;
-  float L1 = 0.3;
-  float L2 = r4 * 2;
-  */
 
   // Slot Translational Distance w/ Solution Selection
   if (R <= (L1 + r1) + L2)
@@ -1091,8 +1046,9 @@ void CommTask(void *pvParameters)
             latestData.h = th;
             latestData.d = td;
 
+            /* debugging print statement
             static uint32_t lastTime = millis();
-            if (millis() - lastTime > 200) // Print every 200 ms
+            if (millis() - lastTime > 500)
             {
               Serial2.print("Received X: ");
               Serial2.print(tx);
@@ -1108,8 +1064,44 @@ void CommTask(void *pvParameters)
               Serial2.println(td);
               lastTime = millis();
             }
+            */
             
             // white on edge to receive from screen, green on edge to receive from esp32 
+            xSemaphoreGive(dataMutex);
+          }
+        }
+
+        if (matched == 2){
+          // This is for the demo mode, where we just receive x and y coordinates until 0,0 is sent
+          if (xSemaphoreTake(dataMutex, (TickType_t)10) == pdTRUE)
+          {
+            latestData.x = tx;
+            latestData.y = ty;
+
+            // as each x and y point is sent, we need to add it to camX[i] an camY[i]
+            if (receivedPoints < 100) // Assuming a maximum of 100 points
+            {
+              camX[receivedPoints] = tx;
+              camY[receivedPoints] = ty;
+              receivedPoints++;
+            }
+
+
+            static uint32_t lastTime = millis();
+            if (millis() - lastTime > 500)
+            {
+              Serial2.print("Received X: ");
+              Serial2.print(tx);
+              Serial2.print(" Y: ");
+              Serial2.println(ty);
+              lastTime = millis();
+            }
+
+            if (tx == 0 && ty == 0)
+            {
+              allPointsReceived = true;
+            }
+
             xSemaphoreGive(dataMutex);
           }
         }
@@ -1120,44 +1112,6 @@ void CommTask(void *pvParameters)
         packetBuffer += c;
       }
     }
-
-    
-    /*
-    if (newData)
-    {
-      int parsed = sscanf(receivedBuffer, "X%d Y%d", &receivedX, &receivedY);
-
-      if (parsed == 2)
-      { // sscanf returns how many variables it successfully filled
-        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE)
-        {
-          if (receivedX == 0 && receivedY == 0)
-          {
-            Serial.println("No more points");
-            newData = false;
-            allPointsReceived = true;
-          }
-          else if (receivedPoints < 100)
-          {
-            Serial.print("Parsed successfully! X: ");
-            Serial.print(receivedX);
-            Serial.print(" | Y: ");
-            Serial.println(receivedY);
-            camX[receivedPoints] = receivedX;
-            camY[receivedPoints] = receivedY;
-            receivedPoints++;
-          } else {
-            Serial.println("Error: Too many points received, max is 100.");
-          }
-          xSemaphoreGive(dataMutex);
-        }
-      }
-      else
-      {
-        Serial.println("Error: Message format was wrong.");
-      }
-      newData = false; // Reset the flag for the next message
-    }*/
 
     vTaskDelay(5 / portTICK_PERIOD_MS);
   }
@@ -1183,46 +1137,21 @@ void linspace(float start, float end, int numPoints, float *output)
   }
 }
 
-// old MoveTo
-/*void MoveTo(float startX, float startY, float endX, float endY)
-{
-  dist = sqrt(pow((endX - startX), 2) + pow((endY - startY), 2));
-  pointCount = int(dist * pointDensity);
-  linspace(startX, endX, pointCount, xPoints);
-  linspace(startY, endY, pointCount, yPoints);
-  for (int i = 0; i < pointCount; i++)
-  {
-    inverseCalc(xPoints[i], yPoints[i], i);
-    Setpoint1 = constrain(radToPos(theta1[i]), minPos1, maxPos1);
-    Setpoint2 = constrain(radToPos(THETA2[i]), minPos2, maxPos2);
-    bool arrived1 = PositionChange1(Setpoint1);
-    bool arrived2 = PositionChange2(Setpoint2);
-    int timeout = 0;
-    while (!arrived1 || !arrived2)
-    {
-      arrived1 = PositionChange1(Setpoint1);
-      arrived2 = PositionChange2(Setpoint2);
-      vTaskDelay(5 / portTICK_PERIOD_MS); // Short delay to prevent CPU overload
-      timeout++;
-      if (timeout > 200) break;
-    }
-    currentPosX = xPoints[i];
-    currentPosY = yPoints[i];
-  }
-}*/
-
-
 // Linear interpolates from start to end and moves the end effector
 void MoveTo(float endX, float endY)
 {
+  syncCurrentPosition(); 
+  vTaskDelay(pdMS_TO_TICKS(100)); // small delay to ensure current position is updated before calculating trajectory
   dist = sqrt(pow((endX - currentPosX), 2) + pow((endY - currentPosY), 2));
   pointCount = int(dist * pointDensity);
 
   // edge case where distance is small
-  if (pointCount < 1) {
-    currentPosX = endX;
-    currentPosY = endY;
-    return; 
+  if (pointCount < 2) {
+    pointCount = 2;
+  }
+
+  if (pointCount > maxPoints) {
+    pointCount = maxPoints;
   }
 
   linspace(currentPosX, endX, pointCount, xPoints);
@@ -1233,26 +1162,23 @@ void MoveTo(float endX, float endY)
     inverseCalc(xPoints[i], yPoints[i], i);
     Setpoint1 = constrain(radToPos(theta1[i]), minPos1, maxPos1);
     Setpoint2 = constrain(radToPos(THETA2[i]), minPos2, maxPos2);
-    bool arrived1 = PositionChange1(Setpoint1);
-    bool arrived2 = PositionChange2(Setpoint2);
-    /* use this loop instead of plain positionchange for more accuracy
+    bool arrived1 = false;
+    bool arrived2 = false;
+    //use this loop instead of plain positionchange for more accuracy
     int timeout = 0; 
-    while (!arrived1 || !arrived2)
+    while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
     {
-      arrived1 = PositionChange1(Setpoint1);
-      arrived2 = PositionChange2(Setpoint2);
-      vTaskDelay(TICK_5MS);
+      //arrived1 = PositionChange1(Setpoint1);
+      //arrived2 = PositionChange2(Setpoint2);
+      vTaskDelay(pdMS_TO_TICKS(5));
       timeout++;
       if (timeout > 500) break;
-    }*/
-    PositionChange1(Setpoint1);
-    PositionChange2(Setpoint2);
+    }
+    //PositionChange1(Setpoint1);
+    //PositionChange2(Setpoint2);
     
     // intentional delay between points
     vTaskDelay(pdMS_TO_TICKS(10));
-
-    currentPosX = xPoints[i];
-    currentPosY = yPoints[i];
   }
 
   while (!PositionChange1(Setpoint1) || !PositionChange2(Setpoint2)) {
