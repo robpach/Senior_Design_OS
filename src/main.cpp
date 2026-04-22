@@ -34,6 +34,7 @@ void CommTask(void *pvParameters);
 void MoveTo(float endX, float endY);
 void ForwardCalc(float theta1, float THETA2);
 void syncCurrentPosition();
+void MoveToPTP(float endX, float endY);
 
 // Intitialize the GPIO expansion
 Adafruit_PCF8574 pcf;
@@ -80,18 +81,22 @@ int last_rx_y = 0;
 int last_rx_a = 0;
 int last_rx_s = 0;
 
+// motor position for homing and control
+long theta1_home, theta2_home;
+long theta1_target, theta2_target;
+
+
 // link lengths all in m
 // the commented values are the link lengths of nicky's model
-// CALIBRATE R1 ONCE ASSEMBLED
 /*
-// values given by Nicky, not necessarily wrong, but wanted to try my own
-const float r1 = 0.04717; // 0.;
-const float r2 = 0.16117; // 0.123;
-const float r3 = 0.1651;  // 0.126;
-const float r4 = 0.17296; // 0.129115
+// values given by Nicky on 4/22/2026
+const float r1 = 0.0360;
+const float r2 = 0.1230;
+const float r3 = 0.1260;  
+const float r4 = 0.1319; 
 int theta2_0 = 0;
-float L1 = 0.3;    //
-float L2 = r4 * 2; // 0.15942
+float L1 = 0.185;    
+float L2 = 0.1624; 
 float theta2_max = 160 * deg2rad;
 */
 const float r1 = 0.0355;
@@ -178,8 +183,6 @@ int cylinder = 11; // or 13 // make this the DB pin or one of the i2c pins from 
 float camX[100];
 float camY[100];
 float receivedX, receivedY;
-char receivedBuffer[32];
-volatile bool newData = false;
 volatile bool allPointsReceived = false;
 
 // encoder parameters
@@ -193,7 +196,7 @@ const int minPos1 = -(int)((float)totalCounts * (23.0 / 360.0)); // 23 degrees b
 const int maxPos1 = (180.0 / 360.0) * (float)totalCounts;
 // motor 2
 const int minPos2 = 0; // (10.0 / 360.0) * (float)totalCounts;
-const int maxPos2 = (180.0 / 360.0) * (float)totalCounts;
+const int maxPos2 = ((180.0 / 360.0) * (float)totalCounts) + maxPos1;
 
 
 // Home Positions - CHANGE THESE TO ACTUAL X AND Y AFTER HOMING
@@ -202,7 +205,8 @@ float homePosY = 0.5; // 0
 
 // PID PARAMETERS //
 
-float Kp = 0.20, Ki = 0.0, Kd = 0.04; // Kp = 0.18, Kd = 0.006
+float Kp = 0.20, Ki = 0.0, Kd = 0.01; // Kp = 0.18, Kd = 0.006
+float Kp1 = 0.30;
 
 // motor 1
 float Input1, Output1, Setpoint1;
@@ -215,7 +219,7 @@ QuickPID PID2(&Input2, &Output2, &Setpoint2);
 
 // speed scaling factor for PID output, between 0 and 1
 // this just limits the maximum speed
-float speedScale = 0.8;
+float speedScale = 0.2;
 // I can also change pointDensity to affect smoothness/speed
 
 // Serial
@@ -331,7 +335,7 @@ void setup()
   // PID INITIALIZATION //
   // motor1
   Input1 = position1;
-  PID1.SetTunings(Kp, Ki, Kd);
+  PID1.SetTunings(Kp1, Ki, Kd);
   PID1.SetMode(PID1.Control::automatic);
   PID1.SetAntiWindupMode(PID1.iAwMode::iAwCondition);
   PID1.SetOutputLimits(-255, 255);
@@ -348,6 +352,8 @@ void setup()
 void loop()
 {
 
+  
+  
   /*
   MotorDirection(1, HIGH);
   MotorDirection(2, HIGH);
@@ -364,8 +370,8 @@ void loop()
   
   receivedPoints = 1;
   allPointsReceived = true;
-  camX[0] = 0.3;
-  camY[0] = 0.3;
+  camX[0] = 0.2;
+  camY[0] = 0.2;
 
   // theta 2 testing code
   // hit theta2 limit then go to 3 different PID controlled points
@@ -441,18 +447,20 @@ void loop()
       {
         currentState = Demo;
       }
-      else if (last_rx_x != rx_x || last_rx_y != rx_y || last_rx_a != rx_a || last_rx_s != rx_s)
+      else if (last_rx_x != rx_x || last_rx_y != rx_y)
       {
-        updatePosition(rx_x, rx_y);
         last_rx_x = rx_x;
         last_rx_y = rx_y;
         last_rx_a = rx_a;
         last_rx_s = rx_s;
-        Serial.print("Received X: ");
-        Serial.print(rx_x);
-        Serial.print(" Y: ");
-        Serial.print(rx_y);
         currentState = Moving;
+      }
+      else if (last_rx_a != rx_a || last_rx_s != rx_s) 
+      {
+        last_rx_a = rx_a;
+        last_rx_s = rx_s;
+        zAxis(rx_a);
+        suction(rx_s);
       }
     }
 
@@ -473,7 +481,6 @@ void loop()
     // THEN, the esp32 should send a signal through Serial2 giving the camera a green light  
     // At this point, the mechanism should be homed
 
-    // reset demo variable
    /*
     while(!PositionChange1(pictureCount))
     {
@@ -489,11 +496,11 @@ void loop()
     }
     else if (allPointsReceived)
     {
-      const TickType_t actuationDelay = pdMS_TO_TICKS(500);
+      const TickType_t actuationDelay = pdMS_TO_TICKS(300);
       for (int i = 0; i < receivedPoints; i++)
       {
         // move from current position to chip position and pick up
-        MoveTo(camX[i], camY[i]);
+        MoveToPTP(camX[i], camY[i]);
         vTaskDelay(actuationDelay);
         zAxis(1);
         vTaskDelay(actuationDelay);
@@ -501,10 +508,11 @@ void loop()
         vTaskDelay(actuationDelay);
         zAxis(0);
 
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        // delete this after testing
+        vTaskDelay(pdMS_TO_TICKS(1000));
 
         // move to carriage and drop off
-        MoveTo(carriageX, carriageY);
+        MoveToPTP(carriageX, carriageY);
         vTaskDelay(actuationDelay);
         zAxis(1);
         vTaskDelay(actuationDelay);
@@ -512,12 +520,11 @@ void loop()
         vTaskDelay(actuationDelay);
         zAxis(0);
 
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        vTaskDelay(pdMS_TO_TICKS(1000));
       }
       receivedPoints = 0;
       allPointsReceived = false;
-      //currentState = Waiting; uncomment after done with testing
-      while (true);
+      currentState = Waiting; 
     }
     break;
 
@@ -533,23 +540,37 @@ void loop()
     }
 
     // 2. Update the target in real-time, which ignores previous target then
+
+    /*
+    // setpoints for inverse kinematic control
     updatePosition(rx_x, rx_y);
     inverseCalc(currentPosX, currentPosY, 1);
-
     Setpoint1 = constrain(radToPos(theta1[1]), minPos1, maxPos1);
     Setpoint2 = constrain(radToPos(THETA2[1]), minPos2, maxPos2);
+    */
+
+    // setpoints for motor control
+    IncrementAngles(rx_x, rx_y);
+    Setpoint1 = constrain(theta1_target, minPos1, maxPos1);
+    Setpoint2 = constrain(theta2_target, minPos2, maxPos2) + Setpoint1;
 
     // 3. Drive motors
-    bool arrive1 = PositionChange1(Setpoint1);
-    bool arrive2 = PositionChange2(Setpoint2);
-    vTaskDelay(pdMS_TO_TICKS(5));
+    while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
+    {
+      PositionChange1(Setpoint1);
+      PositionChange2(Setpoint2);
+      vTaskDelay(pdMS_TO_TICKS(5));
+      zAxis(rx_a);
+      suction(rx_s);
+    }
 
     // 4. Update pneumatics live
     zAxis(rx_a);
     suction(rx_s);
 
     // 5. Only exit when the robot has caught up to the target
-
+    bool arrive1 = PositionChange1(Setpoint1);
+    bool arrive2 = PositionChange2(Setpoint2);
     if (arrive1 && arrive2) 
     {
         currentState = Waiting; 
@@ -665,32 +686,19 @@ void HomeMotors()
   currentPosX = homePosX;
   currentPosY = homePosY;
 
+  // Set the known home positions in encoder counts
+  theta1_home = position1;
+  theta2_home = position2;
+
   rx_h = 0;
-
+  
   // PID testing
-  /*
-  vTaskDelay(pdMS_TO_TICKS(1000));
 
-  while (!PositionChange2(1000)){
-    vTaskDelay(pdMS_TO_TICKS(5));
-  }
+  //MoveToPTP(0.2, 0.2);
 
-  vTaskDelay(pdMS_TO_TICKS(1000));
+  //while (true);
 
-  while(!PositionChange1(2000) | !PositionChange2(5000))
-  {
-    PositionChange1(2000);
-    PositionChange2(5000);
-    vTaskDelay(pdMS_TO_TICKS(5));
-  }
 
-  vTaskDelay(pdMS_TO_TICKS(1000));
-
-  syncCurrentPosition();
-  MoveTo(0.0, 0.4);
-
-  while (true);
-  */
 }
 
 void syncCurrentPosition() {
@@ -728,11 +736,13 @@ void suction(int toggleS)
   {
     pcf.digitalWrite(vacuum, HIGH);
     // Serial.println("Suction On");
+    // add a statement to turn off the positive pressure solenoid
   }
   else if (toggleS == 0)
   {
     pcf.digitalWrite(vacuum, LOW);
     // Serial.println("Suction Off");
+    // add a statement to turn on the positive pressure solenoid
   }
 }
 
@@ -880,21 +890,6 @@ void Stop()
   */
   Serial.println("Stopped.");
   currentState = Waiting;
-}
-
-void receiveEvent(int howMany)
-{
-  if (currentState == Demo)
-  {
-    int i = 0;
-    while (Wire.available() && i < (sizeof(receivedBuffer) - 1))
-    {
-      receivedBuffer[i] = Wire.read();
-      i++;
-    }
-    receivedBuffer[i] = '\0'; // Null-terminate the string so sscanf knows where it ends
-    newData = true;
-  }
 }
 
 void inverseCalc(float Px, float Py, int i)
@@ -1141,7 +1136,6 @@ void linspace(float start, float end, int numPoints, float *output)
 void MoveTo(float endX, float endY)
 {
   syncCurrentPosition(); 
-  vTaskDelay(pdMS_TO_TICKS(100)); // small delay to ensure current position is updated before calculating trajectory
   dist = sqrt(pow((endX - currentPosX), 2) + pow((endY - currentPosY), 2));
   pointCount = int(dist * pointDensity);
 
@@ -1166,10 +1160,10 @@ void MoveTo(float endX, float endY)
     bool arrived2 = false;
     //use this loop instead of plain positionchange for more accuracy
     int timeout = 0; 
-    while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
+    while (!arrived1 || !arrived2)
     {
-      //arrived1 = PositionChange1(Setpoint1);
-      //arrived2 = PositionChange2(Setpoint2);
+      arrived1 = PositionChange1(Setpoint1);
+      arrived2 = PositionChange2(Setpoint2);
       vTaskDelay(pdMS_TO_TICKS(5));
       timeout++;
       if (timeout > 500) break;
@@ -1181,8 +1175,23 @@ void MoveTo(float endX, float endY)
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 
-  while (!PositionChange1(Setpoint1) || !PositionChange2(Setpoint2)) {
-    vTaskDelay(TICK_5MS);
+}
+
+void MoveToPTP(float endX, float endY) {
+  syncCurrentPosition();
+  inverseCalc(endX, endY, 0);
+  Setpoint1 = constrain(radToPos(theta1[0]), minPos1, maxPos1);
+  Setpoint2 = constrain(radToPos(THETA2[0]), minPos2, maxPos2);
+  while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
+  {
+    PositionChange1(Setpoint1);
+    PositionChange2(Setpoint2);
+    vTaskDelay(pdMS_TO_TICKS(5));
   }
 
+}
+
+void IncrementAngles(int rx_x, int rx_y) {
+  theta1_target = theta1_home + (rx_x * 40);
+  theta2_target = theta2_home + (rx_y * 40);
 }
