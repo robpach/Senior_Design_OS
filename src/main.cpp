@@ -181,6 +181,10 @@ int motor2CS = 5;
 int limit1 = 38; // this limit is for theta1
 int limit2 = 39; // this limit is for theta2
 
+// arrival flags
+bool arrive1 = false;
+bool arrive2 = false;
+
 // z-axis and suction
 int vacuum = 5; // PCF
 int cylinder = 11; // or 13 // make this the DB pin or one of the i2c pins from the extender
@@ -212,16 +216,16 @@ float homePosY = 0.5; // 0
 // PID PARAMETERS //
 
 // MoveTo parameters
-float Kp1_MT = 0.05, Ki1_MT = 0.0, Kd1_MT = 0.00;
-float Kp2_MT = 0.05, Ki2_MT = 0.0, Kd2_MT = 0.00; // Kp = 0.10, Kd = 0.001
+float Kp1_MT = 0.05, Ki1_MT = 0.0, Kd1_MT = 0.001;
+float Kp2_MT = 0.05, Ki2_MT = 0.0, Kd2_MT = 0.001;
 
-// Theta control parameters
-float Kp1 = 0.10, Ki1 = 0.0, Kd1 = 0.001; // Kp = 0.05 Kd = 0.001
-float Kp2 = 0.10, Ki2 = 0.0, Kd2 = 0.001;
+// Motor control parameters 
+float Kp1 = 0.10, Ki1 = 0.0, Kd1 = 0.002; // Kp = 0.05 Kd = 0.001
+float Kp2 = 0.10, Ki2 = 0.0, Kd2 = 0.002;
 
 // XY control parameters
-float Kp1_inv = 0.10, Ki1_inv = 0.0, Kd1_inv = 0.00; // Kp = 0.05 Kd = 0.001
-float Kp2_inv = 0.10, Ki2_inv = 0.0, Kd2_inv = 0.00;
+float Kp1_inv = 0.10, Ki1_inv = 0.0, Kd1_inv = 0.0001; // Kp = 0.05 Kd = 0.001
+float Kp2_inv = 0.10, Ki2_inv = 0.0, Kd2_inv = 0.0001;
 
 // motor 1
 float Input1, Output1, Setpoint1;
@@ -366,82 +370,15 @@ void setup()
   PID2.SetSampleTimeUs(2000);
 
   // To test the demo, uncomment this line
-  //allPointsReceived = true;
+  allPointsReceived = true;
 }
 
 void loop()
 {
-
-  
-  
-  /*
-  MotorDirection(1, HIGH);
-  MotorDirection(2, HIGH);
-  analogWrite(motor1PWM, 80);
-  analogWrite(motor2PWM, 80);
-  vTaskDelay(pdMS_TO_TICKS(500));
-  analogWrite(motor1PWM, 0);
-  analogWrite(motor2PWM, 0);
-  while (true);
-  */
-
-  // DEMO LOOP TESTING CODE
-  // this allows us to bypass receiving serial array from the pi
   
   receivedPoints = 1;
   camX[0] = 0.22;
   camY[0] = 0.35;
-
-  // theta 2 testing code
-  // hit theta2 limit then go to 3 different PID controlled points
-  /*
-  bool limitHit = digitalRead(limit2);
-  MotorDirection(2,LOW);
-  analogWrite(motor2PWM, 80);
-  while (!limitHit) {
-    limitHit = digitalRead(limit2);
-  }
-  analogWrite(motor2PWM, 0);
-  position2 = 0;
-  pcf.digitalWrite(vacuum, HIGH);
-
-  while (!PositionChange2(2000))
-  {
-    vTaskDelay(pdMS_TO_TICKS(5));
-  }
-
-  while (true);
-  
-  vTaskDelay(pdMS_TO_TICKS(1000));
-
-  PositionChange1(1000);
-  PositionChange2(3000);
-
-  // try getting rid of integral gain because dithering happens on this call of positionchange2
-  while(!PositionChange1(1000) | !PositionChange2(3000))
-  {
-    PositionChange1(1000);
-    PositionChange2(3000);
-    vTaskDelay(pdMS_TO_TICKS(10));
-  }
-
-  while (true);
-
-  */
-
-  /* THETA 1 TESTING CODE 
-  position1 = 0;  
-
-  while (true) {
-    suction(1);
-    vTaskDelay(pdMS_TO_TICKS(200));
-    suction(0);
-    vTaskDelay(pdMS_TO_TICKS(200));
-  }
-  
-  while (true);
-  */
-
 
   switch (currentState)
   {
@@ -563,6 +500,38 @@ void loop()
     break;
 
   case Kinematics:
+
+    // This will be a kinematic demo that goes through a couple of points
+    // it doesn't use actuation or suction
+
+    // Point to Point movement //
+    // set the PID parameters for long distance point call
+    PID1.SetTunings(Kp1_MT, Ki1_MT, Kd1_MT);
+    PID2.SetTunings(Kp2_MT, Ki2_MT, Kd2_MT);
+    MoveToPTP(0.22, 0.35);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    MoveToPTP(-0.22, 0.35);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    MoveToPTP(0.0, 0.2);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    MoveToPTP(0.0, 0.4);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    // Linear Movement //
+    // set the PID parameters for linear movement
+    PID1.SetTunings(Kp1, Ki1, Kd1);
+    PID2.SetTunings(Kp2, Ki2, Kd2);
+    MoveTo(-0.3, 0.1);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    MoveTo(-0.22, 0.35);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    MoveTo(0.22, 0.35);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    MoveTo(0.0, 0.3);
+
+    latestData.k = 0;
+    currentState = Waiting;
+
     break;
 
   case InverseControl:
@@ -576,8 +545,8 @@ void loop()
       xSemaphoreGive(dataMutex);
     }
 
-    PID1.SetTunings(Kp1, Ki1, Kd1);
-    PID2.SetTunings(Kp2, Ki2, Kd2);
+    PID1.SetTunings(Kp1_inv, Ki1_inv, Kd1_inv);
+    PID2.SetTunings(Kp2_inv, Ki2_inv, Kd2_inv);
 
     // setpoints for inverse kinematic control
     updatePosition(rx_x, rx_y);
@@ -587,7 +556,7 @@ void loop()
     Setpoint1 = constrain(radToPos(theta1[1]), minPos1, maxPos1);
     Setpoint2 = constrain(radToPos(THETA2[1]), minPos2, maxPos2);
 
-    while (!PositionChange1(Setpoint1) || !PositionChange2(Setpoint2))
+    while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
     {
       PositionChange1(Setpoint1);
       PositionChange2(Setpoint2);
@@ -599,21 +568,11 @@ void loop()
     zAxis(rx_a);
     suction(rx_s);
     
-    bool arrive1 = PositionChange1(Setpoint1);
-    bool arrive2 = PositionChange2(Setpoint2);
+    arrive1 = PositionChange1(Setpoint1);
+    arrive2 = PositionChange2(Setpoint2);
     if (arrive1 && arrive2) {
       currentState = Waiting;
     }
-
-    /*
-    // 5. Only exit when the robot has caught up to the target
-    bool arrive1 = PositionChange1(Setpoint1);
-    bool arrive2 = PositionChange2(Setpoint2);
-    if (arrive1 && arrive2) 
-    {
-        currentState = Waiting; 
-    }
-    */
 
     /*
     // printing deugging every 200 ms
@@ -634,8 +593,8 @@ void loop()
     // look at the data being received from serial
       if (xSemaphoreTake(dataMutex, (TickType_t)0) == pdTRUE)
       {
-        rx_ma = latestData.x;
-        rx_mb = latestData.y;
+        rx_ma = latestData.ma;
+        rx_mb = latestData.mb;
         rx_a = latestData.a;
         rx_s = latestData.s;
         xSemaphoreGive(dataMutex);
@@ -647,10 +606,9 @@ void loop()
       // setpoints for motor control
       IncrementAngles(rx_ma, rx_mb);
       Setpoint1 = constrain(theta1_target, minPos1, maxPos1);
-      Setpoint2 = constrain(theta2_target, minPos2, maxPos2) + Setpoint1;
-      
+      Setpoint2 = constrain(theta2_target + Setpoint1, minPos2, maxPos2);
 
-      while (!PositionChange1(Setpoint1) || !PositionChange2(Setpoint2))
+      while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
       {
         PositionChange1(Setpoint1);
         PositionChange2(Setpoint2);
@@ -662,21 +620,11 @@ void loop()
       zAxis(rx_a);
       suction(rx_s);
       
-      bool arrive1 = PositionChange1(Setpoint1);
-      bool arrive2 = PositionChange2(Setpoint2);
+      arrive1 = PositionChange1(Setpoint1);
+      arrive2 = PositionChange2(Setpoint2);
       if (arrive1 && arrive2) {
         currentState = Waiting;
       }
-
-      /*
-      // 5. Only exit when the robot has caught up to the target
-      bool arrive1 = PositionChange1(Setpoint1);
-      bool arrive2 = PositionChange2(Setpoint2);
-      if (arrive1 && arrive2) 
-      {
-          currentState = Waiting; 
-      }
-      */
 
       /*
       // printing deugging every 200 ms
@@ -709,6 +657,10 @@ void MotorDirection(int motor, int direction)
     else if (direction == LOW)
     {
       pcf.digitalWrite(motor1dirA, LOW);
+      digitalWrite(motor1dirB, HIGH);
+    } else if (direction == 3) 
+    {
+      pcf.digitalWrite(motor1dirA, HIGH);
       digitalWrite(motor1dirB, HIGH);
     }
   }
@@ -759,7 +711,9 @@ void HomeMotors()
   }
   analogWrite(motor1PWM, 0);
   analogWrite(motor2PWM, 0);
-  position1 = (int)(-(float)totalCounts * (17.5/360.0)); // 17 degrees below parallel with x axis
+  MotorDirection(1,3); // brake
+  theta1_home = (-(float)totalCounts * (17.5/360.0));
+  position1 = (int)theta1_home; // 17 degrees below parallel with x axis
   
   // home theta 2
   limitHit2 = digitalRead(limit2);
@@ -769,10 +723,12 @@ void HomeMotors()
     limitHit2 = digitalRead(limit2);
   }
   analogWrite(motor2PWM, 0);
-  position2 = (int)((float)totalCounts * (7.4/360.0)); // 7 degrees from parallel with theta1
+  MotorDirection(2,3); // brake
+  theta2_home = ((float)totalCounts * (7.4/360.0));
+  position2 = (int)theta2_home; // 7 degrees from parallel with theta1
 
-  float start_theta1 = ((float)position1 / (float)totalCounts) * 2 * PI;
-  float start_theta2 = ((float)position2 / (float)totalCounts) * 2 * PI;
+  float start_theta1 = ((float)theta1_home / (float)totalCounts) * 2 * PI;
+  float start_theta2 = ((float)theta2_home / (float)totalCounts) * 2 * PI;
 
   // set home position. ForwardCalc redefince Xcalc and Ycalc globals
   ForwardCalc(start_theta1, start_theta2);
@@ -782,8 +738,17 @@ void HomeMotors()
   currentPosY = homePosY;
 
   // Set the known home positions in encoder counts
-  theta1_home = position1;
-  theta2_home = position2;
+  //theta1_home = position1;
+  //theta2_home = position2;
+
+  vTaskDelay(pdMS_TO_TICKS(500));
+  // call the motors to the position for ensured accuracy
+  while (!PositionChange1(theta1_home) | !PositionChange2(theta2_home))
+  {
+    PositionChange1(theta1_home);
+    PositionChange2(theta2_home);
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
   
   // PID testing
   /*
@@ -1258,7 +1223,7 @@ void CommTask(void *pvParameters)
         packetBuffer += c;
       }
     }
-    vTaskDelay(5 / portTICK_PERIOD_MS);
+    vTaskDelay(pdMS_TO_TICKS(5));
   }
 }
 
