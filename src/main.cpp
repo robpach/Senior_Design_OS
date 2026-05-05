@@ -234,7 +234,7 @@ float Kp1 = 0.10, Ki1 = 0.0, Kd1 = 0.001; // Kp = 0.05 Kd = 0.001
 float Kp2 = 0.10, Ki2 = 0.0, Kd2 = 0.001;
 
 // XY control parameters
-float Kp1_inv = 0.10, Ki1_inv = 0.0, Kd1_inv = 0.0001; // Kp = 0.05 Kd = 0.001
+float Kp1_inv = 0.10, Ki1_inv = 0.0, Kd1_inv = 0.0001; // Kp = 0.10 Kd = 0.0001
 float Kp2_inv = 0.10, Ki2_inv = 0.0, Kd2_inv = 0.0001;
 
 // motor 1
@@ -1098,10 +1098,11 @@ void CommTask(void *pvParameters)
       if (c == '\n')
       {
         int tx, ty, ta, ts, th, td, tk, tma, tmb;
+        float tx_f, ty_f;
         int matched_inverse = sscanf(packetBuffer.c_str(), "X%d Y%d A%d S%d H%d", &tx, &ty, &ta, &ts, &th);
         int matched_motor = sscanf(packetBuffer.c_str(), "MA%d MB%d A%d S%d H%d", &tma, &tmb, &ta, &ts, &th);
         int matched_demo = sscanf(packetBuffer.c_str(), "H%d D%d K%d", &th, &td, &tk);
-        int matched_camera = sscanf(packetBuffer.c_str(), "X%d Y%d", &tx, &ty);
+        int matched_camera = sscanf(packetBuffer.c_str(), "X%f Y%f", &tx_f, &ty_f);
 
 
         if (matched_inverse == 5)
@@ -1139,23 +1140,23 @@ void CommTask(void *pvParameters)
           // This is for the demo mode, where we just receive x and y coordinates until 0,0 is sent
           if (xSemaphoreTake(dataMutex, (TickType_t)10) == pdTRUE)
           {
-            latestData.x = tx;
-            latestData.y = ty;
+            latestData.x = tx_f;
+            latestData.y = ty_f;
             // as each x and y point is sent, we need to add it to camX[i] an camY[i]
             if (receivedPoints < 100) // Assuming a maximum of 100 points
             {
-              camX[receivedPoints] = tx;
-              camY[receivedPoints] = ty;
+              camX[receivedPoints] = tx_f;
+              camY[receivedPoints] = ty_f;
               receivedPoints++;
 
               // print the received points
               Serial2.print("Received Point: ");
-              Serial2.print(tx);
+              Serial2.print(tx_f);
               Serial2.print(", ");
-              Serial2.println(ty);
+              Serial2.println(ty_f);
             }
             
-            if (tx == 0 && ty == 0)
+            if (tx_f == 0.0 && ty_f == 0.0)
             {
               allPointsReceived = true;
             }
