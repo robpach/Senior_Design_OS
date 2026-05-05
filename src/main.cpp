@@ -69,7 +69,7 @@ double THETA2[maxPoints];
 
 // Demo position parameters
 float carriageX = 0.0;
-float carriageY = 0.3; // both in meters, these are just test values
+float carriageY = 0.4; // both in meters, these are just test values
 int receivedPoints = 0;
 float pictureAngle = PI;
 int pictureCount = radToPos(pictureAngle);
@@ -98,7 +98,7 @@ const float r2 = 0.1230;
 const float r3 = 0.1260;  
 const float r4 = 0.1319; 
 int theta2_0 = 0;
-float L1 = 0.186; // questionable
+float L1 = 0.188; // 0.186 before
 float L2 = 0.1624; 
 float theta2_max = 160 * deg2rad;
 
@@ -181,13 +181,17 @@ int motor2CS = 5;
 int limit1 = 38; // this limit is for theta1
 int limit2 = 39; // this limit is for theta2
 
+// solenoid valves
+int cylinder = 7; // pcf
+int vacuum_sol = 6; // pcf
+
 // arrival flags
 bool arrive1 = false;
 bool arrive2 = false;
 
-// z-axis and suction
+// vacuum
 int vacuum = 5; // PCF
-int cylinder = 11; // or 13 // make this the DB pin or one of the i2c pins from the extender
+
 
 // camera variable
 float camX[100];
@@ -202,26 +206,32 @@ const int totalCounts = 9600; // in encoder counts
 
 // Limits in encoder counts for each motor
 // motor 1
-const int minPos1 = -(int)((float)totalCounts * (23.0 / 360.0)); // 23 degrees below parallel with x axis, negative because of the way we set up the encoders and directions
+const float theta1_min = 0.0;
+const int minPos1 = -(int)((float)totalCounts * (theta1_min / 360.0));
 const int maxPos1 = (180.0 / 360.0) * (float)totalCounts;
 // motor 2
-const int minPos2 = 0; // (10.0 / 360.0) * (float)totalCounts;
+const float theta2_min = 9.0;
+const int minPos2 = (theta2_min / 360.0) * (float)totalCounts;
 const int maxPos2 = ((180.0 / 360.0) * (float)totalCounts) + maxPos1;
 
 
 // Home Positions - CHANGE THESE TO ACTUAL X AND Y AFTER HOMING
 float homePosX = 0.0; // add the link lengths together
-float homePosY = 0.5; // 0
+float homePosY = 0.0; // 0
 
 // PID PARAMETERS //
 
 // MoveTo parameters
 float Kp1_MT = 0.05, Ki1_MT = 0.0, Kd1_MT = 0.001;
-float Kp2_MT = 0.05, Ki2_MT = 0.0, Kd2_MT = 0.001;
+float Kp2_MT = 0.08, Ki2_MT = 0.0, Kd2_MT = 0.001;
+
+// MoveToPTP parameters
+float Kp1_PTP = 0.05, Ki1_PTP = 0.0, Kd1_PTP = 0.001;
+float Kp2_PTP = 0.05, Ki2_PTP = 0.0, Kd2_PTP = 0.001;
 
 // Motor control parameters 
-float Kp1 = 0.10, Ki1 = 0.0, Kd1 = 0.002; // Kp = 0.05 Kd = 0.001
-float Kp2 = 0.10, Ki2 = 0.0, Kd2 = 0.002;
+float Kp1 = 0.10, Ki1 = 0.0, Kd1 = 0.001; // Kp = 0.05 Kd = 0.001
+float Kp2 = 0.10, Ki2 = 0.0, Kd2 = 0.001;
 
 // XY control parameters
 float Kp1_inv = 0.10, Ki1_inv = 0.0, Kd1_inv = 0.0001; // Kp = 0.05 Kd = 0.001
@@ -238,7 +248,7 @@ QuickPID PID2(&Input2, &Output2, &Setpoint2);
 
 // speed scaling factor for PID output, between 0 and 1
 // this just limits the maximum speed
-float speedScale = 0.3;
+float speedScale = 0.2;
 // I can also change pointDensity to affect smoothness/speed
 
 // Serial
@@ -265,7 +275,7 @@ void setup()
   // while (!Serial);
   delay(1000);
   Serial2.begin(115200, SERIAL_8N1, 10, 12); // rx, tx
-  Serial.println("System Online. Listening for other ESP32 on Pins 10/12...");
+  Serial2.println("System Online. Listening for other ESP32 on Pins 10/12...");
 
   // Built in LED
   pinMode(LED_BUILTIN, OUTPUT);
@@ -323,8 +333,11 @@ void setup()
   pinMode(limit2, INPUT_PULLDOWN);
 
   // suction and actuation
+  pcf.digitalWrite(cylinder, LOW);
   pcf.pinMode(vacuum, OUTPUT);
-  pinMode(cylinder, OUTPUT);
+  pcf.pinMode(vacuum_sol, OUTPUT);
+  pcf.pinMode(cylinder, OUTPUT);
+  
 
   // i2c lines
   pinMode(21, INPUT_PULLUP);
@@ -376,9 +389,11 @@ void setup()
 void loop()
 {
   
-  receivedPoints = 1;
+  receivedPoints = 2;
   camX[0] = 0.22;
-  camY[0] = 0.35;
+  camY[0] = 0.30;
+  camX[1] = -0.22;
+  camY[1] = 0.30;
 
   switch (currentState)
   {
@@ -447,18 +462,10 @@ void loop()
     // THEN, the esp32 should send a signal through Serial2 giving the camera a green light  
     // At this point, the mechanism should be homed
 
-    /*
-    MotorDirection(2,HIGH);
-    while(!PositionChange1(pictureCount) | !PositionChange2(position2))
-    {
-      PositionChange1(pictureCount);
-      PositionChange2(position2);
-      vTaskDelay(pdMS_TO_TICKS(5));
-    }
-    */
-
     Serial2.println("picture");
 
+    PID1.SetTunings(Kp1_PTP, Ki1_PTP, Kd1_PTP);
+    PID2.SetTunings(Kp2_PTP, Ki2_PTP, Kd2_PTP);
     // create some sort of statement that guarantees all data is sent, aka camX[receivedPoints] && camY[receivedPoints] = 0
     if (!allPointsReceived)
     {
@@ -472,9 +479,9 @@ void loop()
         // move from current position to chip position and pick up
         MoveToPTP(camX[i], camY[i]);
         vTaskDelay(actuationDelay);
-        zAxis(1);
-        vTaskDelay(actuationDelay);
         suction(1);
+        vTaskDelay(actuationDelay);
+        zAxis(1);
         vTaskDelay(actuationDelay);
         zAxis(0);
 
@@ -506,8 +513,8 @@ void loop()
 
     // Point to Point movement //
     // set the PID parameters for long distance point call
-    PID1.SetTunings(Kp1_MT, Ki1_MT, Kd1_MT);
-    PID2.SetTunings(Kp2_MT, Ki2_MT, Kd2_MT);
+    PID1.SetTunings(Kp1_PTP, Ki1_PTP, Kd1_PTP);
+    PID2.SetTunings(Kp2_PTP, Ki2_PTP, Kd2_PTP);
     MoveToPTP(0.22, 0.35);
     vTaskDelay(pdMS_TO_TICKS(1000));
     MoveToPTP(-0.22, 0.35);
@@ -516,19 +523,18 @@ void loop()
     vTaskDelay(pdMS_TO_TICKS(1000));
     MoveToPTP(0.0, 0.4);
     vTaskDelay(pdMS_TO_TICKS(1000));
-
+    MoveToPTP(0.22, 0.30);
     // Linear Movement //
     // set the PID parameters for linear movement
-    PID1.SetTunings(Kp1, Ki1, Kd1);
-    PID2.SetTunings(Kp2, Ki2, Kd2);
-    MoveTo(-0.3, 0.1);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    MoveTo(-0.22, 0.35);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    MoveTo(0.22, 0.35);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    MoveTo(0.0, 0.3);
 
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    
+    PID1.SetTunings(Kp1_MT, Ki1_MT, Kd1_MT);
+    PID2.SetTunings(Kp2_MT, Ki2_MT, Kd2_MT);
+    MoveTo(-0.22, 0.30);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    MoveTo(0.22, 0.30);
+    
     latestData.k = 0;
     currentState = Waiting;
 
@@ -705,32 +711,32 @@ void HomeMotors()
   analogWrite(motor2PWM, 30);
   bool limitHit1 = digitalRead(limit1);
   MotorDirection(1, LOW);
-  analogWrite(motor1PWM, 50);
+  analogWrite(motor1PWM, 60);
   while (!limitHit1) {
     limitHit1 = digitalRead(limit1);
   }
   analogWrite(motor1PWM, 0);
   analogWrite(motor2PWM, 0);
   MotorDirection(1,3); // brake
-  theta1_home = (-(float)totalCounts * (17.5/360.0));
-  position1 = (int)theta1_home; // 17 degrees below parallel with x axis
+  theta1_home = (-(float)totalCounts * (theta1_min / 360.0)); // change this potentially, it was at 17.0 before
+  position1 = (int)theta1_home; // 17.5 degrees below parallel with x axis
   
   // home theta 2
   limitHit2 = digitalRead(limit2);
   MotorDirection(2, LOW);
-  analogWrite(motor2PWM, 80);
+  analogWrite(motor2PWM, 50);
   while (!limitHit2) {
     limitHit2 = digitalRead(limit2);
   }
   analogWrite(motor2PWM, 0);
   MotorDirection(2,3); // brake
-  theta2_home = ((float)totalCounts * (7.4/360.0));
+  theta2_home = ((float)totalCounts * (theta2_min / 360.0));
   position2 = (int)theta2_home; // 7 degrees from parallel with theta1
 
   float start_theta1 = ((float)theta1_home / (float)totalCounts) * 2 * PI;
   float start_theta2 = ((float)theta2_home / (float)totalCounts) * 2 * PI;
 
-  // set home position. ForwardCalc redefince Xcalc and Ycalc globals
+  // set home position. ForwardCalc redefine Xcalc and Ycalc globals
   ForwardCalc(start_theta1, start_theta2);
   homePosX = Xcalc;
   homePosY = Ycalc;
@@ -741,6 +747,7 @@ void HomeMotors()
   //theta1_home = position1;
   //theta2_home = position2;
 
+  /*
   vTaskDelay(pdMS_TO_TICKS(500));
   // call the motors to the position for ensured accuracy
   while (!PositionChange1(theta1_home) | !PositionChange2(theta2_home))
@@ -749,6 +756,7 @@ void HomeMotors()
     PositionChange2(theta2_home);
     vTaskDelay(pdMS_TO_TICKS(2));
   }
+  */
   
   // PID testing
   /*
@@ -782,12 +790,12 @@ void zAxis(int toggleA)
 
   if (toggleA == 1)
   {
-    digitalWrite(cylinder, HIGH);
+    pcf.digitalWrite(cylinder, HIGH);
     // Serial.println("Actuator On");
   }
   else if (toggleA == 0)
   {
-    digitalWrite(cylinder, LOW);
+    pcf.digitalWrite(cylinder, LOW);
     // Serial.println("Actuator Off");
   }
 }
@@ -798,12 +806,14 @@ void suction(int toggleS)
   if (toggleS == 1)
   {
     pcf.digitalWrite(vacuum, HIGH);
+    pcf.digitalWrite(vacuum_sol, LOW);
     // Serial.println("Suction On");
     // add a statement to turn off the positive pressure solenoid
   }
   else if (toggleS == 0)
   {
     pcf.digitalWrite(vacuum, LOW);
+    pcf.digitalWrite(vacuum_sol, HIGH);
     // Serial.println("Suction Off");
     // add a statement to turn on the positive pressure solenoid
   }
@@ -813,8 +823,8 @@ void updatePosition(int x, int y)
 {
   // translate the positions rx_x and rx_y into actual positions in meters
   // we need a scale factor here, rx_x and rx_y are just integers
-  currentPosX = homePosX + x * 0.001;
-  currentPosY = homePosY + y * 0.001;
+  currentPosX = homePosX + x * 0.003;
+  currentPosY = homePosY + y * 0.003;
   
   // add a statement controlling the out of bounds error.
   // if sqrt(pow(currentPosX,2) + pow(currentPosY,2)) > (r1+r2+r3+r4) then out of bounds
@@ -1073,76 +1083,6 @@ void ForwardCalc(float th1, float TH2) {
 
 }
 
-
-/*
-// This is the original, untouched Commtask, designed for the screen_4_21 waveshare project
-// Background task to handle serial communication 
-void CommTask(void *pvParameters)
-{
-
-  String packetBuffer = "";
-
-  for (;;)
-  { // Infinite loop for the task
-    while (Serial2.available() > 0)
-    {
-      char c = Serial2.read();
-
-      if (c == '\n')
-      {
-        int tx, ty, ta, ts, th, td;
-        int matched = sscanf(packetBuffer.c_str(), "X%d Y%d A%d S%d H%d D%d",
-                             &tx, &ty, &ta, &ts, &th, &td);
-
-        if (matched == 6)
-        {
-          // Update the shared struct safely using a Mutex
-          if (xSemaphoreTake(dataMutex, (TickType_t)10) == pdTRUE)
-          {
-            latestData.x = tx;
-            latestData.y = ty;
-            latestData.a = ta;
-            latestData.s = ts;
-            latestData.h = th;
-            latestData.d = td;
-            // white on edge to receive from screen, green on edge to receive from esp32 
-            xSemaphoreGive(dataMutex);
-          }
-        }
-
-        if (matched == 2){
-          // This is for the demo mode, where we just receive x and y coordinates until 0,0 is sent
-          if (xSemaphoreTake(dataMutex, (TickType_t)10) == pdTRUE)
-          {
-            latestData.x = tx;
-            latestData.y = ty;
-            // as each x and y point is sent, we need to add it to camX[i] an camY[i]
-            if (receivedPoints < 100) // Assuming a maximum of 100 points
-            {
-              camX[receivedPoints] = tx;
-              camY[receivedPoints] = ty;
-              receivedPoints++;
-            }
-            
-            if (tx == 0 && ty == 0)
-            {
-              allPointsReceived = true;
-            }
-            xSemaphoreGive(dataMutex);
-          }
-        }
-        packetBuffer = "";
-      }
-      else if (c != '\r')
-      {
-        packetBuffer += c;
-      }
-    }
-    vTaskDelay(5 / portTICK_PERIOD_MS);
-  }
-}
-*/
-
 // This is the new and improved CommTask, to work with screen_4_27 waveshare project
 void CommTask(void *pvParameters)
 {
@@ -1207,6 +1147,12 @@ void CommTask(void *pvParameters)
               camX[receivedPoints] = tx;
               camY[receivedPoints] = ty;
               receivedPoints++;
+
+              // print the received points
+              Serial2.print("Received Point: ");
+              Serial2.print(tx);
+              Serial2.print(", ");
+              Serial2.println(ty);
             }
             
             if (tx == 0 && ty == 0)
@@ -1290,8 +1236,8 @@ void MoveTo(float endX, float endY)
 
 void MoveToPTP(float endX, float endY) {
   syncCurrentPosition();
-  PID1.SetTunings(Kp1, Ki1, Kd1);
-  PID2.SetTunings(Kp2, Ki2, Kd2);
+  PID1.SetTunings(Kp1_PTP, Ki1_PTP, Kd1_PTP);
+  PID2.SetTunings(Kp2_PTP, Ki2_PTP, Kd2_PTP);
   inverseCalc(endX, endY, 0);
   Setpoint1 = constrain(radToPos(theta1[0]), minPos1, maxPos1);
   Setpoint2 = constrain(radToPos(THETA2[0]), minPos2, maxPos2);
