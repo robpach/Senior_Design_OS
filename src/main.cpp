@@ -59,13 +59,14 @@ float Xcalc, Ycalc;
 
 // Kinematic arrays
 const int maxPoints = 1000;
-float pointDensity = 400.0; 
+float pointDensity = 200.0; 
 float dist = 0.0;
 int pointCount = 0;
 float xPoints[maxPoints];
 float yPoints[maxPoints];
-double theta1[maxPoints];
-double THETA2[maxPoints];
+float theta1[maxPoints];
+float THETA2[maxPoints];
+float d;
 
 // Demo position parameters
 float carriageX = 0.0;
@@ -212,7 +213,7 @@ const int maxPos1 = (180.0 / 360.0) * (float)totalCounts;
 // motor 2
 const float theta2_min = 9.0;
 const int minPos2 = (theta2_min / 360.0) * (float)totalCounts;
-const int maxPos2 = ((180.0 / 360.0) * (float)totalCounts) + maxPos1;
+const int maxPos2 = ((180.0 / 360.0) * (float)totalCounts);
 
 
 // Home Positions - CHANGE THESE TO ACTUAL X AND Y AFTER HOMING
@@ -226,16 +227,16 @@ float Kp1_MT = 0.05, Ki1_MT = 0.0, Kd1_MT = 0.001;
 float Kp2_MT = 0.08, Ki2_MT = 0.0, Kd2_MT = 0.001;
 
 // MoveToPTP parameters
-float Kp1_PTP = 0.05, Ki1_PTP = 0.0, Kd1_PTP = 0.001;
-float Kp2_PTP = 0.05, Ki2_PTP = 0.0, Kd2_PTP = 0.001;
+float Kp1_PTP = 0.05, Ki1_PTP = 0.0, Kd1_PTP = 0.002;
+float Kp2_PTP = 0.04, Ki2_PTP = 0.0, Kd2_PTP = 0.002;
 
 // Motor control parameters 
-float Kp1 = 0.10, Ki1 = 0.0, Kd1 = 0.001; // Kp = 0.05 Kd = 0.001
+float Kp1 = 0.05, Ki1 = 0.0, Kd1 = 0.0001; // Kp = 0.05 Kd = 0.001
 float Kp2 = 0.10, Ki2 = 0.0, Kd2 = 0.001;
 
 // XY control parameters
-float Kp1_inv = 0.10, Ki1_inv = 0.0, Kd1_inv = 0.0001; // Kp = 0.10 Kd = 0.0001
-float Kp2_inv = 0.10, Ki2_inv = 0.0, Kd2_inv = 0.0001;
+float Kp1_inv = 0.08, Ki1_inv = 0.0, Kd1_inv = 0.000; // Kp = 0.10 Kd = 0.0001
+float Kp2_inv = 0.05, Ki2_inv = 0.0, Kd2_inv = 0.0001;
 
 // motor 1
 float Input1, Output1, Setpoint1;
@@ -513,8 +514,6 @@ void loop()
 
     // Point to Point movement //
     // set the PID parameters for long distance point call
-    PID1.SetTunings(Kp1_PTP, Ki1_PTP, Kd1_PTP);
-    PID2.SetTunings(Kp2_PTP, Ki2_PTP, Kd2_PTP);
     MoveToPTP(0.22, 0.35);
     vTaskDelay(pdMS_TO_TICKS(1000));
     MoveToPTP(-0.22, 0.35);
@@ -523,17 +522,32 @@ void loop()
     vTaskDelay(pdMS_TO_TICKS(1000));
     MoveToPTP(0.0, 0.4);
     vTaskDelay(pdMS_TO_TICKS(1000));
-    MoveToPTP(0.22, 0.30);
+    MoveToPTP(0.22, 0.35);
     // Linear Movement //
     // set the PID parameters for linear movement
 
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    
-    PID1.SetTunings(Kp1_MT, Ki1_MT, Kd1_MT);
-    PID2.SetTunings(Kp2_MT, Ki2_MT, Kd2_MT);
-    MoveTo(-0.22, 0.30);
     vTaskDelay(pdMS_TO_TICKS(1000));
-    MoveTo(0.22, 0.30);
+    
+    MoveTo(-0.22, 0.35);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    MoveToPTP(0.0, 0.4);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    while(!PositionChange2(minPos2 + position1 + 500)) {
+      PositionChange2(minPos2 + position1 + 500);
+      vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+    while(!PositionChange2(2400 + position1)) {
+      PositionChange2(2400 + position1);
+      vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+    while(!PositionChange2(minPos2 + position1 + 500)) {
+      PositionChange2(minPos2 + position1 + 500);
+      vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    
     
     latestData.k = 0;
     currentState = Waiting;
@@ -560,7 +574,7 @@ void loop()
     //PID1.SetTunings(Kp1_inv, Ki1_inv, Kd1_inv);
     //PID2.SetTunings(Kp2_inv, Ki2_inv, Kd2_inv);
     Setpoint1 = constrain(radToPos(theta1[1]), minPos1, maxPos1);
-    Setpoint2 = constrain(radToPos(THETA2[1]), minPos2, maxPos2);
+    Setpoint2 = constrain(radToPos(THETA2[1]), minPos2 + Setpoint1, maxPos2 + Setpoint1);
 
     while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
     {
@@ -612,7 +626,7 @@ void loop()
       // setpoints for motor control
       IncrementAngles(rx_ma, rx_mb);
       Setpoint1 = constrain(theta1_target, minPos1, maxPos1);
-      Setpoint2 = constrain(theta2_target + Setpoint1, minPos2, maxPos2);
+      Setpoint2 = constrain(theta2_target + Setpoint1, minPos2 + Setpoint1, maxPos2 + Setpoint1);
 
       while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
       {
@@ -829,6 +843,15 @@ void updatePosition(int x, int y)
   // add a statement controlling the out of bounds error.
   // if sqrt(pow(currentPosX,2) + pow(currentPosY,2)) > (r1+r2+r3+r4) then out of bounds
 
+  // out of bounds error processing, stay at last position
+    if (sqrt(pow(currentPosX,2) + pow(currentPosY,2)) > (L1 + r1 + L2)) {
+      currentPosX = homePosX + last_rx_x * 0.003;
+      currentPosY = homePosY + last_rx_y * 0.003;
+    } else if  (sqrt(pow(currentPosX,2) + pow(currentPosY,2)) < 0.185) { // also add a minimum radius to avoid singularity
+      currentPosX = homePosX + last_rx_x * 0.003;
+      currentPosY = homePosY + last_rx_y * 0.003;
+    }
+
 }
 
 bool PositionChange1(int target)
@@ -849,7 +872,7 @@ bool PositionChange1(int target)
   // 2. DEADZONE (Only if we didn't arrive)
   if (Output1 != 0 && abs(Output1) <= 35)
   {
-    Output1 = (Output1 >= 0) ? 40 : -40;
+    Output1 = (Output1 >= 0) ? 35 : -35;
   }
 
   // 3. CONSTRAIN & WRITE
@@ -987,11 +1010,17 @@ void inverseCalc(float Px, float Py, int i)
   // Solve for theta2 according to d
   float acos_calc = (sq(R) - sq(L1 + r1) - sq(L2 + d)) / (2 * (L2 + d) * (L1 + r1));
   float acos_value = constrain(acos_calc, -1.0, 1.0);
-  float theta2 = acos(acos_value);
+  float theta2 = abs(acos(acos_value));
 
+  /*
   if ((R > L1 + r2 + r3 + r4) || (abs(theta2) > theta2_max))
   {
     Serial2.println("Unachievable position, restart program");
+    return;
+  }
+  */
+
+  if ((R >= 0.47) || R <= 0.186) {
     return;
   }
 
@@ -1025,13 +1054,23 @@ void inverseCalc(float Px, float Py, int i)
   u3 = (B3 - sqrt(sq(A3) + sq(B3) - sq(C3))) / (C3 + A3);
 
   // solve for THETA2
-  if (d <= 1e-6)
+  if (d <= 1e-6f)
   {
     THETA2[i] = 2.0 * atan(u2);
+    /*
+    float num = B2 - sqrt(discriminant2);
+    float den = C2 + A2; 
+    THETA2[i] = 2.0f*atan2f(num, den);
+    */
   }
   else
   {
     THETA2[i] = 2.0 * atan(u3);
+    /*
+    float num = B3 - sqrt(sq(A3) + sq(B3) - sq(C3));
+    float den = C3 + A3;
+    THETA2[i] = 2.0f*atan2f(num, den);
+    */
   }
 
   // Differential drive compensation
@@ -1050,7 +1089,7 @@ void ForwardCalc(float th1, float TH2) {
   // We will use constants r1, r2, r3, r4, theta2_0, L1, L2 as known
 
   // Intitialize all local variables
-  float A_1, B_1, C_1, K, A, B, C, u, theta2, discriminant, d;
+  float A_1, B_1, C_1, K, A, B, C, u, theta2, discriminant;
 
   // solve for variable length d
   A_1 = 1;
@@ -1219,7 +1258,7 @@ void MoveTo(float endX, float endY)
   {
     inverseCalc(xPoints[i], yPoints[i], i);
     Setpoint1 = constrain(radToPos(theta1[i]), minPos1, maxPos1);
-    Setpoint2 = constrain(radToPos(THETA2[i]), minPos2, maxPos2);
+    Setpoint2 = constrain(radToPos(THETA2[i]), minPos2 + Setpoint1, maxPos2 + Setpoint1);
     //use this loop instead of plain positionchange for more accuracy
     int timeout = 0; 
     while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
@@ -1241,7 +1280,7 @@ void MoveToPTP(float endX, float endY) {
   PID2.SetTunings(Kp2_PTP, Ki2_PTP, Kd2_PTP);
   inverseCalc(endX, endY, 0);
   Setpoint1 = constrain(radToPos(theta1[0]), minPos1, maxPos1);
-  Setpoint2 = constrain(radToPos(THETA2[0]), minPos2, maxPos2);
+  Setpoint2 = constrain(radToPos(THETA2[0]), minPos2 + Setpoint1, maxPos2 + Setpoint1);
   while (!PositionChange1(Setpoint1) | !PositionChange2(Setpoint2))
   {
     PositionChange1(Setpoint1);
